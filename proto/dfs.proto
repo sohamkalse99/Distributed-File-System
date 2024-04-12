@@ -1,0 +1,23 @@
+syntax = "proto3";
+option go_package = "./handler";
+
+message Registration {
+    string storage_node_name = 1;
+    string storage_port_number = 2;
+    string status = 3; /* ok or not ok*/
+}
+
+message Heartbeat {
+    /*Add name with the heartbeat*/
+    string storage_node_name = 1;
+    string storage_port_number = 2; 
+    uint64 space_availability = 3;
+    int32 request_processed_count = 4;
+}
+
+message Wrapper {
+    oneof task {
+        Registration reg_task = 1;
+        Heartbeat heartbeat_task = 2;
+    }
+}
