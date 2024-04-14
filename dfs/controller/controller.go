@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-func checkSNValidity(snTimeMap map[string]time.Time) {
+func checkSNValidity(snTimeMap map[string]time.Time, activeSNSet map[string]bool) {
 
 	for {
 		currTime := time.Now().Format("2006-01-02 15:04:05")
@@ -24,32 +24,68 @@ func checkSNValidity(snTimeMap map[string]time.Time) {
 			diff := currTimeFormatted.Sub(value)
 			if diff > 15*time.Second {
 				fmt.Println(key, "is Off", "Reinitalize yourself as new node")
+				activeSNSet[key] = false
 			} else {
 				fmt.Println(key, "is On")
 			}
 
 		}
+
 		time.Sleep(5 * time.Second)
+
 	}
 
 }
 
-func registerStorageNode(snHandler *handler.StorageNodeHandler, activeSNSet map[string]bool, snName string, snPortNo string) {
+func registerStorageNode(snHandler *handler.StorageNodeHandler, activeSNSet map[string]bool, snTimeMap map[string]time.Time, snName string, snPortNo string) {
+	currTime := time.Now().Format("2006-01-02 15:04:05")
+	currTimeFormatted, formatErr := time.Parse("2006-01-02 15:04:05", currTime)
 
-	// Add SNname to the set
+	if formatErr != nil {
+		log.Fatalln(formatErr)
+	}
+	// if element is present in snTimeMap, and the diff > 15sec then do not change the activSNSet
 	element := snName + ":" + snPortNo
-	activeSNSet[element] = true
 
-	// Send an ok message
-	okMsg := &handler.Registration{Status: "ok"}
+	if value, ok := snTimeMap[element]; ok {
+		diff := currTimeFormatted.Sub(value)
+		if diff < 15*time.Second {
+			// Add SNname to the set
+			activeSNSet[element] = true
 
-	wrapper := &handler.Wrapper{
-		Task: &handler.Wrapper_RegTask{
-			RegTask: okMsg,
-		},
+			fmt.Println(element, " registered")
+			// Send an ok message
+			okMsg := &handler.Registration{Status: "ok"}
+
+			wrapper := &handler.Wrapper{
+				Task: &handler.Wrapper_RegTask{
+					RegTask: okMsg,
+				},
+			}
+
+			snHandler.Send(wrapper)
+		} else {
+			fmt.Println("Cannot register as time diff greater than 15 secs")
+		}
+	} else {
+		// Registering for the first time, so key would not be there in the snTimeMap
+
+		// Add SNname to the set
+		activeSNSet[element] = true
+
+		fmt.Println(element, " registered")
+		// Send an ok message
+		okMsg := &handler.Registration{Status: "ok"}
+
+		wrapper := &handler.Wrapper{
+			Task: &handler.Wrapper_RegTask{
+				RegTask: okMsg,
+			},
+		}
+
+		snHandler.Send(wrapper)
 	}
 
-	snHandler.Send(wrapper)
 }
 
 func handleHeartbeat(snHandler *handler.StorageNodeHandler, wrapper *handler.Wrapper, activeSNSet map[string]bool, snTimeMap map[string]time.Time) {
@@ -93,8 +129,7 @@ func handleStorageNode(snHandler *handler.StorageNodeHandler, snTimeMap map[stri
 	case *handler.Wrapper_RegTask:
 		snName := task.RegTask.StorageNodeName
 		snPortNo := task.RegTask.StoragePortNumber
-		registerStorageNode(snHandler, activeSNSet, snName, snPortNo)
-		fmt.Println(snName + ":" + snPortNo + " registered")
+		registerStorageNode(snHandler, activeSNSet, snTimeMap, snName, snPortNo)
 		// handleStorageNode(snHandler, snTimeMap, activeSNSet)
 	case *handler.Wrapper_HeartbeatTask:
 		handleHeartbeat(snHandler, wrapper, activeSNSet, snTimeMap)
@@ -115,10 +150,11 @@ func main() {
 	// Used to store SN name and latest time of heartbeat
 	snTimeMap := make(map[string]time.Time)
 
-	go checkSNValidity(snTimeMap)
-
 	// Keeps list of storage nodes which are active
 	activeSNSet := make(map[string]bool)
+
+	go checkSNValidity(snTimeMap, activeSNSet)
+
 	for {
 		fmt.Println("Started an infinite loop")
 		if conn, connErr := listner.Accept(); connErr == nil {
