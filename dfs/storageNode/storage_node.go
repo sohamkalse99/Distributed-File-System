@@ -1,6 +1,7 @@
 package main
 
 import (
+	"dfs/config"
 	"dfs/handler/snHandler"
 	"fmt"
 	"log"
@@ -47,13 +48,12 @@ func sendHeartbeat(handler *snHandler.StorageNodeHandler, storagePath string, sn
 
 func connectToController(controllerPort string, snHostname string, snPort string, storagePath string) net.Conn {
 	// defer conn.Close()
-
-	conn, err := net.Dial("tcp", controllerPort)
+	conn, err := net.Dial("tcp", config.ControllerHostName+":"+controllerPort)
 
 	if err != nil {
 		log.Fatalln(err.Error())
 	}
-
+	fmt.Println("Before conn")
 	return conn
 
 }
@@ -96,9 +96,9 @@ func main() {
 	}
 
 	// /bigdata/students/skalse
-	storagePath := os.Args[2]
+	storagePath := config.StoragePath
 
-	controllerPort := os.Args[3]
+	controllerPort := config.ControllerPortForSN
 
 	// TODO : Calculate number of requests processed (storage/retrievals)
 	// calculateRequestCount()

@@ -145,7 +145,7 @@ func handleStorageNode(handler *snHandler.StorageNodeHandler, snTimeMap map[stri
 func main() {
 
 	// listner, err := net.Listen("tcp", ":"+os.Args[1])
-	listner, err := net.Listen("tcp", ":"+config.ServerPortForSN)
+	listner, err := net.Listen("tcp", ":"+config.ControllerPortForSN)
 
 	if err != nil {
 		log.Fatalln(err.Error())
