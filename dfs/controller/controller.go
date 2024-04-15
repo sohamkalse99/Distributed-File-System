@@ -1,11 +1,11 @@
 package main
 
 import (
-	"dfs/handler"
+	"dfs/config"
+	"dfs/handler/snHandler"
 	"fmt"
 	"log"
 	"net"
-	"os"
 	"time"
 )
 
@@ -37,7 +37,7 @@ func checkSNValidity(snTimeMap map[string]time.Time, activeSNSet map[string]bool
 
 }
 
-func registerStorageNode(snHandler *handler.StorageNodeHandler, activeSNSet map[string]bool, snTimeMap map[string]time.Time, snName string, snPortNo string) {
+func registerStorageNode(handler *snHandler.StorageNodeHandler, activeSNSet map[string]bool, snTimeMap map[string]time.Time, snName string, snPortNo string) {
 	currTime := time.Now().Format("2006-01-02 15:04:05")
 	currTimeFormatted, formatErr := time.Parse("2006-01-02 15:04:05", currTime)
 
@@ -55,15 +55,16 @@ func registerStorageNode(snHandler *handler.StorageNodeHandler, activeSNSet map[
 
 			fmt.Println(element, " registered")
 			// Send an ok message
-			okMsg := &handler.Registration{Status: "ok"}
 
-			wrapper := &handler.Wrapper{
-				Task: &handler.Wrapper_RegTask{
+			okMsg := &snHandler.Registration{Status: "ok"}
+
+			wrapper := &snHandler.Wrapper{
+				Task: &snHandler.Wrapper_RegTask{
 					RegTask: okMsg,
 				},
 			}
 
-			snHandler.Send(wrapper)
+			handler.Send(wrapper)
 		} else {
 			fmt.Println("Cannot register as time diff greater than 15 secs")
 		}
@@ -75,20 +76,20 @@ func registerStorageNode(snHandler *handler.StorageNodeHandler, activeSNSet map[
 
 		fmt.Println(element, " registered")
 		// Send an ok message
-		okMsg := &handler.Registration{Status: "ok"}
+		okMsg := &snHandler.Registration{Status: "ok"}
 
-		wrapper := &handler.Wrapper{
-			Task: &handler.Wrapper_RegTask{
+		wrapper := &snHandler.Wrapper{
+			Task: &snHandler.Wrapper_RegTask{
 				RegTask: okMsg,
 			},
 		}
 
-		snHandler.Send(wrapper)
+		handler.Send(wrapper)
 	}
 
 }
 
-func handleHeartbeat(snHandler *handler.StorageNodeHandler, wrapper *handler.Wrapper, activeSNSet map[string]bool, snTimeMap map[string]time.Time) {
+func handleHeartbeat(handler *snHandler.StorageNodeHandler, wrapper *snHandler.Wrapper, activeSNSet map[string]bool, snTimeMap map[string]time.Time) {
 
 	snName := wrapper.GetHeartbeatTask().StorageNodeName
 	snPort := wrapper.GetHeartbeatTask().StoragePortNumber
@@ -117,22 +118,22 @@ func handleHeartbeat(snHandler *handler.StorageNodeHandler, wrapper *handler.Wra
 
 }
 
-func handleStorageNode(snHandler *handler.StorageNodeHandler, snTimeMap map[string]time.Time, activeSNSet map[string]bool) {
+func handleStorageNode(handler *snHandler.StorageNodeHandler, snTimeMap map[string]time.Time, activeSNSet map[string]bool) {
 
 	// listen to registration/heartbeat from a storage node
 	// defer snHandler.Close()
 
-	wrapper, _ := snHandler.Receive()
+	wrapper, _ := handler.Receive()
 
 	switch task := wrapper.Task.(type) {
 
-	case *handler.Wrapper_RegTask:
+	case *snHandler.Wrapper_RegTask:
 		snName := task.RegTask.StorageNodeName
 		snPortNo := task.RegTask.StoragePortNumber
-		registerStorageNode(snHandler, activeSNSet, snTimeMap, snName, snPortNo)
+		registerStorageNode(handler, activeSNSet, snTimeMap, snName, snPortNo)
 		// handleStorageNode(snHandler, snTimeMap, activeSNSet)
-	case *handler.Wrapper_HeartbeatTask:
-		handleHeartbeat(snHandler, wrapper, activeSNSet, snTimeMap)
+	case *snHandler.Wrapper_HeartbeatTask:
+		handleHeartbeat(handler, wrapper, activeSNSet, snTimeMap)
 	case nil:
 		log.Println("Got a empty message. Disconnecting Storage Node")
 		return
@@ -140,8 +141,11 @@ func handleStorageNode(snHandler *handler.StorageNodeHandler, snTimeMap map[stri
 		log.Printf("Unexpected message type %T", task)
 	}
 }
+
 func main() {
-	listner, err := net.Listen("tcp", ":"+os.Args[1])
+
+	// listner, err := net.Listen("tcp", ":"+os.Args[1])
+	listner, err := net.Listen("tcp", ":"+config.ServerPortForSN)
 
 	if err != nil {
 		log.Fatalln(err.Error())
@@ -158,9 +162,8 @@ func main() {
 	for {
 		fmt.Println("Started an infinite loop")
 		if conn, connErr := listner.Accept(); connErr == nil {
-			snHandler := handler.NewStorageNodeHandler(conn)
-			handleStorageNode(snHandler, snTimeMap, activeSNSet)
-
+			handler := snHandler.NewStorageNodeHandler(conn)
+			handleStorageNode(handler, snTimeMap, activeSNSet)
 		}
 
 	}

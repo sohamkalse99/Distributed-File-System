@@ -1,4 +1,4 @@
-package handler
+package snHandler
 
 import (
 	"encoding/binary"

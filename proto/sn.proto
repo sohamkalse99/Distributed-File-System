@@ -1,5 +1,5 @@
 syntax = "proto3";
-option go_package = "./handler";
+option go_package = "./handler/snHandler";
 
 message Registration {
     string storage_node_name = 1;

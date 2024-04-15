@@ -1,7 +1,7 @@
 package main
 
 import (
-	"dfs/handler"
+	"dfs/handler/snHandler"
 	"fmt"
 	"log"
 	"net"
@@ -22,7 +22,7 @@ func calculateFreeSpace(storagePath string) (uint64, error) {
 	return stat.Bavail * uint64(stat.Bsize), nil
 }
 
-func sendHeartbeat(snHandler *handler.StorageNodeHandler, storagePath string, snHostname string, snPort string) {
+func sendHeartbeat(handler *snHandler.StorageNodeHandler, storagePath string, snHostname string, snPort string) {
 	// defer snHandler.Close()
 
 	// Calculate Free space
@@ -32,16 +32,17 @@ func sendHeartbeat(snHandler *handler.StorageNodeHandler, storagePath string, sn
 	}
 
 	// Create a Heartbeat wrapper, for now you can create something temporary
-	heartbeatMsg := &handler.Heartbeat{StorageNodeName: snHostname, SpaceAvailability: freeSpace, StoragePortNumber: snPort}
 
-	wrapperMsg := &handler.Wrapper{
-		Task: &handler.Wrapper_HeartbeatTask{
+	heartbeatMsg := &snHandler.Heartbeat{StorageNodeName: snHostname, SpaceAvailability: freeSpace, StoragePortNumber: snPort}
+
+	wrapperMsg := &snHandler.Wrapper{
+		Task: &snHandler.Wrapper_HeartbeatTask{
 			HeartbeatTask: heartbeatMsg,
 		},
 	}
 
 	// Send Heartbeat message
-	snHandler.Send(wrapperMsg)
+	handler.Send(wrapperMsg)
 }
 
 func connectToController(controllerPort string, snHostname string, snPort string, storagePath string) net.Conn {
@@ -57,20 +58,20 @@ func connectToController(controllerPort string, snHostname string, snPort string
 
 }
 
-func sendRegReq(snHandler *handler.StorageNodeHandler, snHostname string, snPort string) {
+func sendRegReq(handler *snHandler.StorageNodeHandler, snHostname string, snPort string) {
 
-	registrationMsg := &handler.Registration{StorageNodeName: snHostname, StoragePortNumber: snPort}
+	registrationMsg := &snHandler.Registration{StorageNodeName: snHostname, StoragePortNumber: snPort}
 
-	wrapperMsg := &handler.Wrapper{
-		Task: &handler.Wrapper_RegTask{
+	wrapperMsg := &snHandler.Wrapper{
+		Task: &snHandler.Wrapper_RegTask{
 			RegTask: registrationMsg,
 		},
 	}
 
-	snHandler.Send(wrapperMsg)
+	handler.Send(wrapperMsg)
 }
 
-func handleHeartbeat(snHandler *handler.StorageNodeHandler, snName string, snPort string, storagePath string) {
+func handleHeartbeat(snHandler *snHandler.StorageNodeHandler, snName string, snPort string, storagePath string) {
 
 	// Send a heartbeat every 5 seconds
 	// for {
@@ -105,19 +106,19 @@ func main() {
 	for {
 		conn := connectToController(controllerPort, snName, snPort, storagePath)
 
-		snHandler := handler.NewStorageNodeHandler(conn)
+		handler := snHandler.NewStorageNodeHandler(conn)
 		if flag {
-			sendRegReq(snHandler, snName, snPort)
+			sendRegReq(handler, snName, snPort)
 
-			wrapper, _ := snHandler.Receive()
+			wrapper, _ := handler.Receive()
 
 			// Will receive an ok message if registration is successful
 			if wrapper.GetRegTask().Status == "ok" {
-				handleHeartbeat(snHandler, snName, snPort, storagePath)
+				handleHeartbeat(handler, snName, snPort, storagePath)
 			}
 			flag = false
 		} else {
-			handleHeartbeat(snHandler, snName, snPort, storagePath)
+			handleHeartbeat(handler, snName, snPort, storagePath)
 		}
 
 		conn.Close()
