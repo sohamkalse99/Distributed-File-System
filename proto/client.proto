@@ -1,0 +1,9 @@
+syntax = "proto3";
+option go_package = "./handler/clientHandler";
+
+message FileOpns {
+    string action = 1;
+    int64 chunk_size= 2;
+    int64 file_size = 3;
+    repeated string dstSN = 4;
+}
