@@ -2,14 +2,19 @@ package main
 
 import (
 	"dfs/config"
+	"dfs/handler/clientHandler"
 	"dfs/handler/snHandler"
 	"fmt"
 	"log"
+	"math"
 	"net"
 	"time"
 )
 
-func checkSNValidity(snTimeMap map[string]time.Time, activeSNSet map[string]bool) {
+var activeSNSet = make(map[string]bool)
+var snTimeMap = make(map[string]time.Time)
+
+func checkSNValidity() {
 
 	for {
 		currTime := time.Now().Format("2006-01-02 15:04:05")
@@ -30,7 +35,6 @@ func checkSNValidity(snTimeMap map[string]time.Time, activeSNSet map[string]bool
 			}
 
 		}
-
 		time.Sleep(5 * time.Second)
 
 	}
@@ -118,7 +122,7 @@ func handleHeartbeat(handler *snHandler.StorageNodeHandler, wrapper *snHandler.W
 
 }
 
-func handleStorageNode(handler *snHandler.StorageNodeHandler, snTimeMap map[string]time.Time, activeSNSet map[string]bool) {
+func handleStorageNodeRequests(handler *snHandler.StorageNodeHandler) {
 
 	// listen to registration/heartbeat from a storage node
 	// defer snHandler.Close()
@@ -142,29 +146,101 @@ func handleStorageNode(handler *snHandler.StorageNodeHandler, snTimeMap map[stri
 	}
 }
 
-func main() {
+func handleStorageNode() {
+	snListner, snListnerErr := net.Listen("tcp", ":"+config.ControllerPortForSN)
 
-	// listner, err := net.Listen("tcp", ":"+os.Args[1])
-	listner, err := net.Listen("tcp", ":"+config.ControllerPortForSN)
-
-	if err != nil {
-		log.Fatalln(err.Error())
+	if snListnerErr != nil {
+		log.Fatalln(snListnerErr.Error())
 	}
 
 	// Used to store SN name and latest time of heartbeat
-	snTimeMap := make(map[string]time.Time)
 
-	// Keeps list of storage nodes which are active
-	activeSNSet := make(map[string]bool)
-
-	go checkSNValidity(snTimeMap, activeSNSet)
+	go checkSNValidity()
 
 	for {
-		fmt.Println("Started an infinite loop")
-		if conn, connErr := listner.Accept(); connErr == nil {
+		fmt.Println("Started an infinite loop to handle SN")
+		if conn, connErr := snListner.Accept(); connErr == nil {
 			handler := snHandler.NewStorageNodeHandler(conn)
-			handleStorageNode(handler, snTimeMap, activeSNSet)
+			handleStorageNodeRequests(handler)
 		}
 
 	}
+}
+
+func getDestinationSN(noOfChunks int64) []string {
+	keyList := make([]string, len(activeSNSet))
+	dstSNList := make([]string, noOfChunks)
+	i := 0
+	for key, value := range activeSNSet {
+		if value {
+			keyList[i] = key
+			i++
+		}
+	}
+
+	for i := 0; i < int(noOfChunks); i++ {
+		dstSNList[i] = keyList[i%len(keyList)]
+	}
+
+	return dstSNList
+}
+
+func handleClientPutReq(chunkSize int64, fileSize int64) []string {
+	// fmt.Println("file size", fileSize)
+	// fmt.Println("chunk size", chunkSize)
+
+	noOfChunks := int64(math.Ceil(float64(fileSize) / float64(chunkSize)))
+	// fmt.Println("no of chunks", noOfChunks)
+
+	dstSNList := getDestinationSN(noOfChunks)
+
+	return dstSNList
+}
+
+func handleClientRequests(handler *clientHandler.ClientHandler) {
+	defer handler.Close()
+
+	fileOpnsMsg, receiveErr := handler.Receive()
+	if receiveErr != nil {
+		log.Fatalln(receiveErr.Error())
+	}
+
+	action := fileOpnsMsg.GetAction()
+	chunkSize := fileOpnsMsg.GetChunkSize()
+	fileSize := fileOpnsMsg.GetFileSize()
+	if action == "put" {
+		dstSNList := handleClientPutReq(chunkSize, fileSize)
+
+		dstSNListmsg := &clientHandler.FileOpns{
+			DstSN: dstSNList,
+		}
+		fmt.Println("Dest SN list", dstSNList)
+		handler.Send(dstSNListmsg)
+	}
+}
+func handleClient() {
+	clientListner, clientListnerErr := net.Listen("tcp", ":"+config.ControllerPortForClient)
+
+	if clientListnerErr != nil {
+		log.Fatalln(clientListnerErr.Error())
+	}
+
+	for {
+		fmt.Println("Started an infinite loop to handle Client")
+
+		if conn, connErr := clientListner.Accept(); connErr == nil {
+			fmt.Println("Accepted client")
+			handler := clientHandler.NewClientHandler(conn)
+			handleClientRequests(handler)
+		}
+	}
+}
+
+func main() {
+
+	// Keeps list of storage nodes which are active
+
+	go handleStorageNode()
+	handleClient()
+
 }
