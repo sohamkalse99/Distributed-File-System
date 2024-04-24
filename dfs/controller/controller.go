@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-var activeSNSet = make(map[string]bool)
+// var activeSNSet = make(map[string]bool)
 var snTimeMap = make(map[string]time.Time)
 
 func checkSNValidity() {
@@ -29,7 +29,7 @@ func checkSNValidity() {
 			diff := currTimeFormatted.Sub(value)
 			if diff > 15*time.Second {
 				fmt.Println(key, "is Off", "Reinitalize yourself as new node")
-				activeSNSet[key] = false
+				// activeSNSet[key] = false
 			} else {
 				fmt.Println(key, "is On")
 			}
@@ -41,7 +41,7 @@ func checkSNValidity() {
 
 }
 
-func registerStorageNode(handler *snHandler.StorageNodeHandler, activeSNSet map[string]bool, snTimeMap map[string]time.Time, snName string, snPortNo string) {
+func registerStorageNode(handler *snHandler.StorageNodeHandler, snName string, snPortNo string) {
 	currTime := time.Now().Format("2006-01-02 15:04:05")
 	currTimeFormatted, formatErr := time.Parse("2006-01-02 15:04:05", currTime)
 
@@ -53,10 +53,13 @@ func registerStorageNode(handler *snHandler.StorageNodeHandler, activeSNSet map[
 
 	if value, ok := snTimeMap[element]; ok {
 		diff := currTimeFormatted.Sub(value)
+		fmt.Println("Time diff", diff)
+
 		if diff < 15*time.Second {
 			// Add SNname to the set
-			activeSNSet[element] = true
-
+			// activeSNSet[element] = true
+			// Set current time to snTimeMap
+			snTimeMap[element] = currTimeFormatted
 			fmt.Println(element, " registered")
 			// Send an ok message
 
@@ -76,8 +79,10 @@ func registerStorageNode(handler *snHandler.StorageNodeHandler, activeSNSet map[
 		// Registering for the first time, so key would not be there in the snTimeMap
 
 		// Add SNname to the set
-		activeSNSet[element] = true
+		// activeSNSet[element] = true
 
+		// set current time in snTimeMap
+		snTimeMap[element] = currTimeFormatted
 		fmt.Println(element, " registered")
 		// Send an ok message
 		okMsg := &snHandler.Registration{Status: "ok"}
@@ -93,32 +98,32 @@ func registerStorageNode(handler *snHandler.StorageNodeHandler, activeSNSet map[
 
 }
 
-func handleHeartbeat(handler *snHandler.StorageNodeHandler, wrapper *snHandler.Wrapper, activeSNSet map[string]bool, snTimeMap map[string]time.Time) {
+func handleHeartbeat(handler *snHandler.StorageNodeHandler, wrapper *snHandler.Wrapper) {
 
 	snName := wrapper.GetHeartbeatTask().StorageNodeName
 	snPort := wrapper.GetHeartbeatTask().StoragePortNumber
 	key := snName + ":" + snPort
-	if _, ok := activeSNSet[key]; ok {
+	// if _, ok := activeSNSet[key]; ok {
 
-		currTime := time.Now().Format("2006-01-02 15:04:05")
-		currTimeFormatted, formatErr := time.Parse("2006-01-02 15:04:05", currTime)
-		if formatErr != nil {
-			log.Fatalln(formatErr)
-		}
-		if value, ok := snTimeMap[key]; ok {
-			diff := currTimeFormatted.Sub(value)
-			fmt.Println("Time diff", diff)
-			if diff > 15*time.Second {
-				fmt.Println("Failure. Reinitalize yourself as new node")
-			} else {
-				fmt.Println("Success")
-				snTimeMap[key] = currTimeFormatted
-			}
+	currTime := time.Now().Format("2006-01-02 15:04:05")
+	currTimeFormatted, formatErr := time.Parse("2006-01-02 15:04:05", currTime)
+	if formatErr != nil {
+		log.Fatalln(formatErr)
+	}
+	if value, ok := snTimeMap[key]; ok {
+		diff := currTimeFormatted.Sub(value)
+		// fmt.Println("Time diff", diff)
+		if diff > 15*time.Second {
+			fmt.Println("Failure. Reinitalize yourself as new node")
 		} else {
+			fmt.Println("Success")
 			snTimeMap[key] = currTimeFormatted
 		}
-
+	} else {
+		fmt.Println("You need to register before sending the heartbeat")
 	}
+
+	// }
 
 }
 
@@ -134,10 +139,10 @@ func handleStorageNodeRequests(handler *snHandler.StorageNodeHandler) {
 	case *snHandler.Wrapper_RegTask:
 		snName := task.RegTask.StorageNodeName
 		snPortNo := task.RegTask.StoragePortNumber
-		registerStorageNode(handler, activeSNSet, snTimeMap, snName, snPortNo)
+		registerStorageNode(handler, snName, snPortNo)
 		// handleStorageNode(snHandler, snTimeMap, activeSNSet)
 	case *snHandler.Wrapper_HeartbeatTask:
-		handleHeartbeat(handler, wrapper, activeSNSet, snTimeMap)
+		handleHeartbeat(handler, wrapper)
 	case nil:
 		log.Println("Got a empty message. Disconnecting Storage Node")
 		return
@@ -168,15 +173,31 @@ func handleStorageNode() {
 }
 
 func getDestinationSN(noOfChunks int64) []string {
-	keyList := make([]string, len(activeSNSet))
+
+	currTime := time.Now().Format("2006-01-02 15:04:05")
+	currTimeFormatted, formatErr := time.Parse("2006-01-02 15:04:05", currTime)
+	if formatErr != nil {
+		log.Fatalln(formatErr)
+	}
+	// i:=0
+	keyList := []string{}
+	for key, value := range snTimeMap {
+		diff := currTimeFormatted.Sub(value)
+		if diff < 15*time.Second {
+			// count++
+			keyList = append(keyList, key)
+		}
+
+	}
+	// keyList := make([]string, len(activeSNSet))
 	dstSNList := make([]string, noOfChunks)
-	i := 0
+	/*i := 0
 	for key, value := range activeSNSet {
 		if value {
 			keyList[i] = key
 			i++
 		}
-	}
+	}*/
 
 	for i := 0; i < int(noOfChunks); i++ {
 		dstSNList[i] = keyList[i%len(keyList)]
