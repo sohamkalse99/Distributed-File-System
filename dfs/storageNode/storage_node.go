@@ -137,19 +137,20 @@ func handleClientRequests(handler *clientSNHandler.ClientSNHandler, snPortForCli
 	if err != nil {
 		log.Fatalln(err.Error())
 	}
-	fileArrList := chunkDetailsMsg.GetChunkArray()
-	noOfChunks := len(fileArrList)
+	fileName := chunkDetailsMsg.GetFileName()
+	chunkArrList := chunkDetailsMsg.GetChunkArray()
+	noOfChunks := len(chunkArrList)
 
 	for i := 0; i < noOfChunks; i++ {
-		fileName := fmt.Sprintf("%s/chunk_%s", config.StoragePath, snPortForClient)
+		chunkName := fmt.Sprintf("%s/%s_chunk_%d", config.StoragePath, fileName, i)
 
 		// file, createErr := os.Create(fileName)
-		writeErr := os.WriteFile(fileName, fileArrList[i], 0644)
+		writeErr := os.WriteFile(chunkName, chunkArrList[i], 0644)
 
 		if writeErr != nil {
 			log.Fatalln(writeErr.Error())
 		} else {
-			fmt.Println("File Created: ", fileName)
+			fmt.Println("File Created: ", chunkName)
 		}
 	}
 
