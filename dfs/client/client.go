@@ -10,9 +10,15 @@ import (
 	"math"
 	"net"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
+
+func extractFileName(path string) string {
+	fileName := filepath.Base(path)
+	return fileName
+}
 
 func calcFileSize(fileName string) int64 {
 	file, err := os.Open(fileName)
@@ -101,7 +107,7 @@ func createChunks(filePath string, dstSNList []string, chunkSize int64, fileSize
 	return chunkSNMap
 }
 
-func connectToSN(chunkSNMap map[string][][]byte) {
+func connectToSN(chunkSNMap map[string][][]byte, fileName string) {
 	for key, value := range chunkSNMap {
 
 		conn, err := net.Dial("tcp", key)
@@ -112,25 +118,12 @@ func connectToSN(chunkSNMap map[string][][]byte) {
 
 		handler := clientSNHandler.NewClientSNHandler(conn)
 		msg := &clientSNHandler.ChunkDetails{
+			FileName:   fileName,
 			ChunkArray: value,
 		}
 		handler.Send(msg)
 
 	}
-}
-
-func getUniqueSN(dstSNList []string) []string {
-	uniqueSN := make(map[string]bool)
-	result := []string{}
-
-	for _, value := range dstSNList {
-		if !uniqueSN[value] {
-			uniqueSN[value] = true
-			result = append(result, value)
-		}
-	}
-
-	return result
 }
 
 func main() {
@@ -173,7 +166,8 @@ func main() {
 			chunkSNMap := createChunks(filePath, dstSNList, chunkSize, fileSize)
 			// fmt.Println("Map of chunks", chunkSNMap)
 			// uniqueSNList := getUniqueSN(dstSNList)
-			connectToSN(chunkSNMap)
+			fileName := extractFileName(filePath)
+			connectToSN(chunkSNMap, fileName)
 		}
 
 	}
