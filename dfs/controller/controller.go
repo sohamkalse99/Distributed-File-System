@@ -13,6 +13,7 @@ import (
 
 // var activeSNSet = make(map[string]bool)
 var snTimeMap = make(map[string]time.Time)
+var fileSNMap = make(map[string][]string)
 
 func checkSNValidity() {
 
@@ -102,6 +103,7 @@ func handleHeartbeat(handler *snHandler.StorageNodeHandler, wrapper *snHandler.W
 
 	snName := wrapper.GetHeartbeatTask().StorageNodeName
 	snPort := wrapper.GetHeartbeatTask().StoragePortNumber
+	// chunkNames := wrapper.GetHeartbeatTask().ChunkNames
 	key := snName + ":" + snPort
 	// if _, ok := activeSNSet[key]; ok {
 
@@ -115,9 +117,11 @@ func handleHeartbeat(handler *snHandler.StorageNodeHandler, wrapper *snHandler.W
 		// fmt.Println("Time diff", diff)
 		if diff > 15*time.Second {
 			fmt.Println("Failure. Reinitalize yourself as new node")
+
 		} else {
 			fmt.Println("Success")
 			snTimeMap[key] = currTimeFormatted
+
 		}
 	} else {
 		fmt.Println("You need to register before sending the heartbeat")
@@ -225,18 +229,34 @@ func handleClientRequests(handler *clientHandler.ClientHandler) {
 	if receiveErr != nil {
 		log.Fatalln(receiveErr.Error())
 	}
-
+	fileName := fileOpnsMsg.GetFileName()
 	action := fileOpnsMsg.GetAction()
-	chunkSize := fileOpnsMsg.GetChunkSize()
-	fileSize := fileOpnsMsg.GetFileSize()
+
 	if action == "put" {
+		chunkSize := fileOpnsMsg.GetChunkSize()
+		fileSize := fileOpnsMsg.GetFileSize()
+
 		dstSNList := handleClientPutReq(chunkSize, fileSize)
+
+		// add to the map
+		fileSNMap[fileName] = dstSNList
 
 		dstSNListmsg := &clientHandler.FileOpns{
 			DstSN: dstSNList,
 		}
 		fmt.Println("Dest SN list", dstSNList)
 		handler.Send(dstSNListmsg)
+	} else if action == "get" {
+		if value, ok := fileSNMap[fileName]; ok {
+
+			msg := &clientHandler.FileOpns{
+				DstSN: value,
+			}
+			handler.Send(msg)
+		} else {
+			// TODO : Probabily need to send a message to the client with the below message
+			fmt.Println("File not present, please insert a file")
+		}
 	}
 }
 func handleClient() {
