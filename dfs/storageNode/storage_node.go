@@ -8,6 +8,9 @@ import (
 	"log"
 	"net"
 	"os"
+	"sort"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -102,7 +105,7 @@ func handleController() {
 	storagePath := config.StoragePath
 
 	controllerPort := config.ControllerPortForSN
-
+	// chunkNames := getChunkDets(config.StoragePath)
 	// TODO : Calculate number of requests processed (storage/retrievals)
 	// calculateRequestCount()
 	flag := true
@@ -138,20 +141,70 @@ func handleClientRequests(handler *clientSNHandler.ClientSNHandler, snPortForCli
 		log.Fatalln(err.Error())
 	}
 	fileName := chunkDetailsMsg.GetFileName()
-	chunkArrList := chunkDetailsMsg.GetChunkArray()
-	noOfChunks := len(chunkArrList)
+	action := chunkDetailsMsg.GetAction()
 
-	for i := 0; i < noOfChunks; i++ {
-		chunkName := fmt.Sprintf("%s/%s_chunk_%d", config.StoragePath, fileName, i)
+	if action == "put" {
+		chunkArrList := chunkDetailsMsg.GetChunkArray()
+		noOfChunks := len(chunkArrList)
+		for i := 0; i < noOfChunks; i++ {
+			chunkName := fmt.Sprintf("%s/%s_chunk_%d", config.StoragePath, fileName, i)
 
-		// file, createErr := os.Create(fileName)
-		writeErr := os.WriteFile(chunkName, chunkArrList[i], 0644)
+			// file, createErr := os.Create(fileName)
+			writeErr := os.WriteFile(chunkName, chunkArrList[i], 0644)
 
-		if writeErr != nil {
-			log.Fatalln(writeErr.Error())
-		} else {
-			fmt.Println("File Created: ", chunkName)
+			if writeErr != nil {
+				log.Fatalln(writeErr.Error())
+			} else {
+				fmt.Println("File Created: ", chunkName)
+			}
 		}
+	} else if action == "get" {
+		dirEntry, err := os.ReadDir(config.StoragePath)
+
+		if err != nil {
+			log.Fatalln(err.Error())
+		}
+		chunkNames := []string{}
+		chunkArr := [][]byte{}
+		// traverse through files get only those file related chunks and add it to slice chunkNames
+		for _, entry := range dirEntry {
+			entryStr := entry.Name()
+			isChunkPresent := strings.Contains(entryStr, fileName)
+			if isChunkPresent {
+				chunkNames = append(chunkNames, entryStr)
+			}
+		}
+
+		// sort the slice according to the digits which come at the end
+		sort.Slice(chunkNames, func(i, j int) bool {
+			splitStrOne := strings.Split(chunkNames[i], "_chunk_")
+			numI, _ := strconv.Atoi(splitStrOne[i])
+
+			splitStrTwo := strings.Split(chunkNames[j], "_chunk_")
+			numJ, _ := strconv.Atoi(splitStrTwo[j])
+
+			return numI < numJ
+		})
+
+		//read file into bytes
+		for _, element := range chunkNames {
+			fileName := fmt.Sprintf("%s/%s", config.StoragePath, element)
+			byteArr, err := os.ReadFile(fileName)
+
+			if err != nil {
+				log.Fatalln(err.Error())
+			}
+
+			chunkArr = append(chunkArr, byteArr)
+
+		}
+		clientGetMsg := &clientSNHandler.ChunkDetails{
+			ChunkArray: chunkArr,
+		}
+
+		// Send chunks for the filename requested by the client
+		handler.Send(clientGetMsg)
+
 	}
 
 }
