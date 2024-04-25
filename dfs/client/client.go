@@ -13,7 +13,12 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 )
+
+var SNChunkArrMap = make(map[string][][]byte)
+var uniqueSNMap = make(map[string]bool)
+var indexMap = make(map[string]int)
 
 func extractFileName(path string) string {
 	fileName := filepath.Base(path)
@@ -43,12 +48,14 @@ func connectToController(controllerPort string) net.Conn {
 	return conn
 }
 
-func sendFileDetails(handler *clientHandler.ClientHandler, action string, filePath string, chunkSize int64, fileSize int64) {
+func sendFileDetails(handler *clientHandler.ClientHandler, action string, filePath string, chunkSize int64, fileSize int64, fileName string) {
 	clientMsg := &clientHandler.FileOpns{
+		FileName:  fileName,
 		Action:    action,
 		ChunkSize: chunkSize,
 		FileSize:  fileSize,
 	}
+
 	handler.Send(clientMsg)
 	fmt.Println("Sent details to controller")
 
@@ -108,6 +115,7 @@ func createChunks(filePath string, dstSNList []string, chunkSize int64, fileSize
 }
 
 func connectToSN(chunkSNMap map[string][][]byte, fileName string) {
+	action := "put"
 	for key, value := range chunkSNMap {
 
 		conn, err := net.Dial("tcp", key)
@@ -120,12 +128,92 @@ func connectToSN(chunkSNMap map[string][][]byte, fileName string) {
 		msg := &clientSNHandler.ChunkDetails{
 			FileName:   fileName,
 			ChunkArray: value,
+			Action:     action,
 		}
 		handler.Send(msg)
 
 	}
 }
+func sendGetMsg(fileName string, clientContHandler *clientHandler.ClientHandler) {
+	getMsg := &clientHandler.FileOpns{
+		FileName: fileName,
+		Action:   "get",
+	}
 
+	clientContHandler.Send(getMsg)
+}
+
+func getSNList(fileName string, clientContHandler *clientHandler.ClientHandler) []string {
+	controllerMsg, err := clientContHandler.Receive()
+
+	if err != nil {
+		log.Fatalln(err.Error())
+	}
+
+	dstSNList := controllerMsg.GetDstSN()
+	return dstSNList
+}
+
+func getChunkFromSN(handler *clientSNHandler.ClientSNHandler, sn string, wg *sync.WaitGroup) {
+	defer wg.Done()
+	chunkDetails, err := handler.Receive()
+	chunkArr := chunkDetails.GetChunkArray()
+	if err != nil {
+		log.Fatalln(err.Error())
+	}
+
+	SNChunkArrMap[sn] = chunkArr
+}
+func sendMsgToSN(fileName string, dstSNList []string) {
+	action := "get"
+	var wg sync.WaitGroup
+	for sn := range uniqueSNMap {
+		conn, err := net.Dial("tcp", sn)
+		if err != nil {
+			log.Fatalln(err.Error())
+		}
+
+		handler := clientSNHandler.NewClientSNHandler(conn)
+
+		snMsg := &clientSNHandler.ChunkDetails{
+			FileName: fileName,
+			Action:   action,
+		}
+
+		handler.Send(snMsg)
+		wg.Add(1)
+		go getChunkFromSN(handler, sn, &wg)
+	}
+	wg.Wait()
+}
+func createFileFromChunks(fileName string, dstSNList []string) {
+	// Initialize indexes to zero in indexMap
+	for key := range SNChunkArrMap {
+		indexMap[key] = 0
+	}
+
+	fileArr := []byte{}
+	for _, element := range dstSNList {
+
+		if values, ok := SNChunkArrMap[element]; ok && indexMap[element] < len(values) {
+			fileArr = append(fileArr, values[indexMap[element]]...)
+			indexMap[element]++
+		}
+	}
+
+	// write to a file
+
+	filePath := fmt.Sprintf("%s/%s", config.GetFolderPath, config.GetFileName)
+
+	writeErr := os.WriteFile(filePath, fileArr, 0644)
+
+	if writeErr != nil {
+		fmt.Println("Error creating the file")
+		log.Fatalln(writeErr.Error())
+	} else {
+		fmt.Println("File Created: ", filePath)
+	}
+}
 func main() {
 
 	scanner := bufio.NewScanner(os.Stdin)
@@ -138,7 +226,9 @@ func main() {
 			break
 		}
 		clientIp := scanner.Text()
-
+		filePath := config.FilePath
+		fileName := extractFileName(filePath)
+		controllerPort := config.ControllerPortForClient
 		// Remove leading and trailing spaces as well as make it lower case
 		if strings.ToLower(strings.Trim(clientIp, "")) == "put" {
 
@@ -154,22 +244,41 @@ func main() {
 			if convErr != nil {
 				log.Fatalln(convErr.Error())
 			}
-			controllerPort := config.ControllerPortForClient
+
 			conn := connectToController(controllerPort)
 			defer conn.Close()
 			handler := clientHandler.NewClientHandler(conn)
-			filePath := config.FilePath
 
 			fileSize := calcFileSize(filePath)
-			sendFileDetails(handler, "put", filePath, chunkSize, fileSize)
+
+			sendFileDetails(handler, "put", filePath, chunkSize, fileSize, fileName)
 			dstSNList := getStorageNodesDetails(handler)
 			chunkSNMap := createChunks(filePath, dstSNList, chunkSize, fileSize)
 			// fmt.Println("Map of chunks", chunkSNMap)
 			// uniqueSNList := getUniqueSN(dstSNList)
-			fileName := extractFileName(filePath)
 			connectToSN(chunkSNMap, fileName)
+		} else if strings.ToLower(strings.Trim(clientIp, "")) == "get" {
+			conn := connectToController(controllerPort)
+			defer conn.Close()
+
+			clientContHandler := clientHandler.NewClientHandler(conn)
+			sendGetMsg(fileName, clientContHandler)
+
+			dstSNList := getSNList(fileName, clientContHandler)
+
+			// Create a unique map of SN's as you want to send requests to unique SN's
+			for _, element := range dstSNList {
+				if _, ok := uniqueSNMap[element]; !ok {
+					uniqueSNMap[element] = true
+				}
+			}
+			sendMsgToSN(fileName, dstSNList)
+			createFileFromChunks(fileName, dstSNList)
 		}
 
+		SNChunkArrMap = make(map[string][][]byte)
+		uniqueSNMap = make(map[string]bool)
+		indexMap = make(map[string]int)
 	}
 
 	/*_, err := net.Listen("tcp", ":"+os.Args[1])
