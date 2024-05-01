@@ -147,26 +147,28 @@ func handleClientRequests(handler *clientSNHandler.ClientSNHandler, snPortForCli
 	if err != nil {
 		log.Fatalln(err.Error())
 	}
-	fileName := chunkDetailsMsg.GetFileName()
+	// fileName := chunkDetailsMsg.GetFileName()
 	action := chunkDetailsMsg.GetAction()
+	chunkNameArr := chunkDetailsMsg.GetChunkNameArray()
 
 	if action == "put" {
-		chunkArrList := chunkDetailsMsg.GetChunkArray()
-		noOfChunks := len(chunkArrList)
+		chunkDataArr := chunkDetailsMsg.GetChunkDataArray()
+
+		noOfChunks := len(chunkDataArr)
 		for i := 0; i < noOfChunks; i++ {
-			chunkName := fmt.Sprintf("%s/%s_chunk_%d", config.StoragePath, fileName, i)
+			chunkFullName := fmt.Sprintf("%s/%s", config.StoragePath, chunkNameArr[i])
 
 			// file, createErr := os.Create(fileName)
-			writeErr := os.WriteFile(chunkName, chunkArrList[i], 0644)
+			writeErr := os.WriteFile(chunkFullName, chunkDataArr[i], 0644)
 
 			if writeErr != nil {
 				log.Fatalln(writeErr.Error())
 			} else {
-				fmt.Println("File Created: ", chunkName)
+				fmt.Println("File Created: ", chunkNameArr[i])
 			}
 		}
 	} else if action == "get" {
-		dirEntry, err := os.ReadDir(config.StoragePath)
+		/*dirEntry, err := os.ReadDir(config.StoragePath)
 
 		if err != nil {
 			log.Fatalln(err.Error())
@@ -176,27 +178,29 @@ func handleClientRequests(handler *clientSNHandler.ClientSNHandler, snPortForCli
 		// traverse through files get only those file related chunks and add it to slice chunkNames
 		for _, entry := range dirEntry {
 			entryStr := entry.Name()
+
 			isChunkPresent := strings.Contains(entryStr, fileName)
 			if isChunkPresent {
 				chunkNames = append(chunkNames, entryStr)
 			}
-		}
+		}*/
 
 		// sort the slice according to the digits which come at the end
-		sort.Slice(chunkNames, func(i, j int) bool {
-			splitStrOne := strings.Split(chunkNames[i], "_chunk_")
+		sort.Slice(chunkNameArr, func(i, j int) bool {
+			splitStrOne := strings.Split(chunkNameArr[i], "_chunk_")
 			numI, _ := strconv.Atoi(splitStrOne[1])
 
-			splitStrTwo := strings.Split(chunkNames[j], "_chunk_")
+			splitStrTwo := strings.Split(chunkNameArr[j], "_chunk_")
 			numJ, _ := strconv.Atoi(splitStrTwo[1])
 
 			return numI < numJ
 		})
 
 		//read file into bytes
-		for _, element := range chunkNames {
-			fileName := fmt.Sprintf("%s/%s", config.StoragePath, element)
-			byteArr, err := os.ReadFile(fileName)
+		chunkArr := [][]byte{}
+		for _, element := range chunkNameArr {
+			chunkName := fmt.Sprintf("%s/%s", config.StoragePath, element)
+			byteArr, err := os.ReadFile(chunkName)
 
 			if err != nil {
 				log.Fatalln(err.Error())
@@ -206,7 +210,7 @@ func handleClientRequests(handler *clientSNHandler.ClientSNHandler, snPortForCli
 
 		}
 		clientGetMsg := &clientSNHandler.ChunkDetails{
-			ChunkArray: chunkArr,
+			ChunkDataArray: chunkArr,
 		}
 
 		// Send chunks for the filename requested by the client
