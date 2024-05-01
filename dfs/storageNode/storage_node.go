@@ -89,7 +89,7 @@ func handleHeartbeat(snHandler *snHandler.StorageNodeHandler, snName string, snP
 
 func handleController() {
 	snName, hnErr := os.Hostname()
-
+	snName = strings.Split(snName, ".")[0]
 	if hnErr != nil {
 		log.Fatalln(hnErr.Error())
 	}
@@ -178,10 +178,10 @@ func handleClientRequests(handler *clientSNHandler.ClientSNHandler, snPortForCli
 		// sort the slice according to the digits which come at the end
 		sort.Slice(chunkNames, func(i, j int) bool {
 			splitStrOne := strings.Split(chunkNames[i], "_chunk_")
-			numI, _ := strconv.Atoi(splitStrOne[i])
+			numI, _ := strconv.Atoi(splitStrOne[1])
 
 			splitStrTwo := strings.Split(chunkNames[j], "_chunk_")
-			numJ, _ := strconv.Atoi(splitStrTwo[j])
+			numJ, _ := strconv.Atoi(splitStrTwo[1])
 
 			return numI < numJ
 		})
