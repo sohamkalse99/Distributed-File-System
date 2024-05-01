@@ -7,5 +7,10 @@ message FileOpns {
     int64 chunk_size= 3;
     int64 file_size = 4;
     bytes checksum = 5;
-    repeated string dstSN = 6;
+    repeated string dstSNList = 6;
+    map<string, chunks> snChunkMap = 7;
+    message chunks {
+        repeated string chunkList = 1; 
+    }
+    
 }
