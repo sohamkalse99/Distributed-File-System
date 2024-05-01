@@ -23,7 +23,7 @@ func (clientSNHandler *ClientSNHandler) readN(buff []byte) error {
 	byteRead := uint64(0)
 
 	for byteRead < uint64(len(buff)) {
-		n, error := clientSNHandler.conn.Read(buff)
+		n, error := clientSNHandler.conn.Read(buff[byteRead:])
 
 		if error != nil {
 			return error
@@ -39,7 +39,7 @@ func (clientSNHandler *ClientSNHandler) writeN(buff []byte) error {
 	byteWrite := uint64(0)
 
 	for byteWrite < uint64(len(buff)) {
-		n, error := clientSNHandler.conn.Write(buff)
+		n, error := clientSNHandler.conn.Write(buff[byteWrite:])
 
 		if error != nil {
 			return error

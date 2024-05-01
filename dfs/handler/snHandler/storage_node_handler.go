@@ -23,7 +23,7 @@ func (storageNodeHandler *StorageNodeHandler) readN(buff []byte) error {
 	byteRead := uint64(0)
 
 	for byteRead < uint64(len(buff)) {
-		n, error := storageNodeHandler.conn.Read(buff)
+		n, error := storageNodeHandler.conn.Read(buff[byteRead:])
 
 		if error != nil {
 			return error
@@ -39,7 +39,7 @@ func (storageNodeHandler *StorageNodeHandler) writeN(buff []byte) error {
 	byteWrite := uint64(0)
 
 	for byteWrite < uint64(len(buff)) {
-		n, error := storageNodeHandler.conn.Write(buff)
+		n, error := storageNodeHandler.conn.Write(buff[byteWrite:])
 
 		if error != nil {
 			return error
