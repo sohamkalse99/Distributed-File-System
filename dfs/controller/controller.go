@@ -14,6 +14,7 @@ import (
 // var activeSNSet = make(map[string]bool)
 var snTimeMap = make(map[string]time.Time)
 var fileSNMap = make(map[string][]string)
+var checkSum []byte
 
 func checkSNValidity() {
 
@@ -235,7 +236,7 @@ func handleClientRequests(handler *clientHandler.ClientHandler) {
 	if action == "put" {
 		chunkSize := fileOpnsMsg.GetChunkSize()
 		fileSize := fileOpnsMsg.GetFileSize()
-
+		checkSum = fileOpnsMsg.GetChecksum()
 		dstSNList := handleClientPutReq(chunkSize, fileSize)
 
 		// add to the map
@@ -250,7 +251,8 @@ func handleClientRequests(handler *clientHandler.ClientHandler) {
 		if value, ok := fileSNMap[fileName]; ok {
 
 			msg := &clientHandler.FileOpns{
-				DstSN: value,
+				Checksum: checkSum,
+				DstSN:    value,
 			}
 			handler.Send(msg)
 		} else {

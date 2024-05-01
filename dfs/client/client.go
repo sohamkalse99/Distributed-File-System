@@ -2,10 +2,12 @@ package main
 
 import (
 	"bufio"
+	"crypto/sha512"
 	"dfs/config"
 	"dfs/handler/clientHandler"
 	"dfs/handler/clientSNHandler"
 	"fmt"
+	"io"
 	"log"
 	"math"
 	"net"
@@ -38,6 +40,22 @@ func calcFileSize(fileName string) int64 {
 	return size
 }
 
+func calcCheckSum(path string) []byte {
+	file, err := os.Open(path)
+	if err != nil {
+		log.Fatalln(err.Error())
+	}
+	defer file.Close()
+
+	h := sha512.New()
+
+	if _, shaErr := io.Copy(h, file); err != nil {
+		log.Fatalln(shaErr)
+	}
+
+	return h.Sum(nil)
+
+}
 func connectToController(controllerPort string) net.Conn {
 	conn, connErr := net.Dial("tcp", config.ControllerHostName+":"+controllerPort)
 
@@ -48,12 +66,13 @@ func connectToController(controllerPort string) net.Conn {
 	return conn
 }
 
-func sendFileDetails(handler *clientHandler.ClientHandler, action string, filePath string, chunkSize int64, fileSize int64, fileName string) {
+func sendFileDetails(handler *clientHandler.ClientHandler, action string, filePath string, chunkSize int64, fileSize int64, fileName string, checkSum []byte) {
 	clientMsg := &clientHandler.FileOpns{
 		FileName:  fileName,
 		Action:    action,
 		ChunkSize: chunkSize,
 		FileSize:  fileSize,
+		Checksum:  checkSum,
 	}
 
 	handler.Send(clientMsg)
@@ -143,15 +162,15 @@ func sendGetMsg(fileName string, clientContHandler *clientHandler.ClientHandler)
 	clientContHandler.Send(getMsg)
 }
 
-func getSNList(fileName string, clientContHandler *clientHandler.ClientHandler) []string {
+func getSNListAndCheckSum(fileName string, clientContHandler *clientHandler.ClientHandler) ([]string, []byte) {
 	controllerMsg, err := clientContHandler.Receive()
 
 	if err != nil {
 		log.Fatalln(err.Error())
 	}
-
+	checkSum := controllerMsg.GetChecksum()
 	dstSNList := controllerMsg.GetDstSN()
-	return dstSNList
+	return dstSNList, checkSum
 }
 
 func getChunkFromSN(handler *clientSNHandler.ClientSNHandler, sn string, wg *sync.WaitGroup) {
@@ -186,7 +205,7 @@ func sendMsgToSN(fileName string, dstSNList []string) {
 	}
 	wg.Wait()
 }
-func createFileFromChunks(fileName string, dstSNList []string) {
+func createFileFromChunks(fileName string, dstSNList []string, checkSum []byte) {
 	// Initialize indexes to zero in indexMap
 	for key := range SNChunkArrMap {
 		indexMap[key] = 0
@@ -212,6 +231,10 @@ func createFileFromChunks(fileName string, dstSNList []string) {
 		log.Fatalln(writeErr.Error())
 	} else {
 		fmt.Println("File Created: ", filePath)
+		cs := calcCheckSum(filePath)
+		if string(cs) == string(checkSum) {
+			fmt.Println("Original File's checksum and assembled file's checksum match")
+		}
 	}
 }
 func main() {
@@ -250,8 +273,8 @@ func main() {
 			handler := clientHandler.NewClientHandler(conn)
 
 			fileSize := calcFileSize(filePath)
-
-			sendFileDetails(handler, "put", filePath, chunkSize, fileSize, fileName)
+			checkSum := calcCheckSum(filePath)
+			sendFileDetails(handler, "put", filePath, chunkSize, fileSize, fileName, checkSum)
 			dstSNList := getStorageNodesDetails(handler)
 			chunkSNMap := createChunks(filePath, dstSNList, chunkSize, fileSize)
 			// fmt.Println("Map of chunks", chunkSNMap)
@@ -264,7 +287,7 @@ func main() {
 			clientContHandler := clientHandler.NewClientHandler(conn)
 			sendGetMsg(fileName, clientContHandler)
 
-			dstSNList := getSNList(fileName, clientContHandler)
+			dstSNList, checkSum := getSNListAndCheckSum(fileName, clientContHandler)
 
 			// Create a unique map of SN's as you want to send requests to unique SN's
 			for _, element := range dstSNList {
@@ -273,7 +296,7 @@ func main() {
 				}
 			}
 			sendMsgToSN(fileName, dstSNList)
-			createFileFromChunks(fileName, dstSNList)
+			createFileFromChunks(fileName, dstSNList, checkSum)
 		}
 
 		SNChunkArrMap = make(map[string][][]byte)

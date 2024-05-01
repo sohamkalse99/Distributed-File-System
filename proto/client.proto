@@ -6,5 +6,6 @@ message FileOpns {
     string action = 2;
     int64 chunk_size= 3;
     int64 file_size = 4;
-    repeated string dstSN = 5;
+    bytes checksum = 5;
+    repeated string dstSN = 6;
 }
