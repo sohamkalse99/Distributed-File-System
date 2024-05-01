@@ -262,6 +262,10 @@ func main() {
 				break
 			}
 			cS := scanner.Text()
+
+			if len(strings.TrimSpace(cS)) == 0 {
+				cS = config.ChunkSize
+			}
 			chunkSize, convErr := strconv.ParseInt(cS, 10, 64)
 			if convErr != nil {
 				log.Fatalln(convErr.Error())
