@@ -14,6 +14,8 @@ import (
 // var activeSNSet = make(map[string]bool)
 var snTimeMap = make(map[string]time.Time)
 var fileSNMap = make(map[string][]string)
+var fileSNChunkMap = make(map[string]map[string]*clientHandler.FileOpnsChunks) // {temp:{orion01:[temp_chunk_1, temp_chunk_2]}}
+var snChunkMap = make(map[string]*clientHandler.FileOpnsChunks)
 var checkSum []byte
 
 func checkSNValidity() {
@@ -176,9 +178,7 @@ func handleStorageNode() {
 
 	}
 }
-
-func getDestinationSN(noOfChunks int64) []string {
-
+func getActiveSNList() []string {
 	currTime := time.Now().Format("2006-01-02 15:04:05")
 	currTimeFormatted, formatErr := time.Parse("2006-01-02 15:04:05", currTime)
 	if formatErr != nil {
@@ -194,31 +194,69 @@ func getDestinationSN(noOfChunks int64) []string {
 		}
 
 	}
-	// keyList := make([]string, len(activeSNSet))
+
+	return keyList
+}
+
+func getDestinationSN(noOfChunks int64) []string {
+
+	activeSNList := getActiveSNList()
 	dstSNList := make([]string, noOfChunks)
-	/*i := 0
-	for key, value := range activeSNSet {
-		if value {
-			keyList[i] = key
-			i++
-		}
-	}*/
 
 	for i := 0; i < int(noOfChunks); i++ {
-		dstSNList[i] = keyList[i%len(keyList)]
+		dstSNList[i] = activeSNList[i%len(activeSNList)]
 	}
 
 	return dstSNList
 }
 
-func handleClientPutReq(chunkSize int64, fileSize int64) []string {
+func mapFileSNAndChunks(fileName string, noOfChunks int64, activeSNList []string, chunkSlice []string) {
+	if _, ok := fileSNChunkMap[fileName]; !ok {
+		fileSNChunkMap[fileName] = snChunkMap
+	}
+}
+
+func getChunkSlice(fileName string, noOfChunks int64) []string {
+	chunkSlice := make([]string, noOfChunks)
+
+	for i := 0; i < int(noOfChunks); i++ {
+		chunkName := fmt.Sprintf("%s_chunk_%d", fileName, (i + 1))
+		chunkSlice[i] = chunkName
+	}
+	return chunkSlice
+}
+
+func createSNChunkMap(dstSNList []string, chunkSlice []string, handler *clientHandler.ClientHandler) {
+
+	for i := 0; i < len(chunkSlice); i++ {
+		if values, ok := snChunkMap[dstSNList[i]]; ok {
+			values.ChunkList = append(values.ChunkList, chunkSlice[i])
+
+			snChunkMap[dstSNList[i]] = values
+		} else {
+			arr := []string{}
+			arr = append(arr, chunkSlice[i])
+
+			//add list which of type fileopnschunk to the map
+			snChunkMap[dstSNList[i]] = &clientHandler.FileOpnsChunks{ChunkList: arr}
+		}
+
+	}
+
+}
+func handleClientPutReq(chunkSize int64, fileSize int64, fileName string, handler *clientHandler.ClientHandler) []string {
 	// fmt.Println("file size", fileSize)
 	// fmt.Println("chunk size", chunkSize)
 
 	noOfChunks := int64(math.Ceil(float64(fileSize) / float64(chunkSize)))
 	// fmt.Println("no of chunks", noOfChunks)
+	activeSNList := getActiveSNList()
 
 	dstSNList := getDestinationSN(noOfChunks)
+
+	chunkSlice := getChunkSlice(fileName, noOfChunks)
+	createSNChunkMap(dstSNList, chunkSlice, handler)
+	mapFileSNAndChunks(fileName, noOfChunks, activeSNList, chunkSlice)
 
 	return dstSNList
 }
@@ -237,23 +275,23 @@ func handleClientRequests(handler *clientHandler.ClientHandler) {
 		chunkSize := fileOpnsMsg.GetChunkSize()
 		fileSize := fileOpnsMsg.GetFileSize()
 		checkSum = fileOpnsMsg.GetChecksum()
-		dstSNList := handleClientPutReq(chunkSize, fileSize)
+		dstSNList := handleClientPutReq(chunkSize, fileSize, fileName, handler)
 
 		// add to the map
 		fileSNMap[fileName] = dstSNList
 
-		dstSNListmsg := &clientHandler.FileOpns{
-			DstSN: dstSNList,
-		}
-		handler.Send(dstSNListmsg)
+		handler.Send(&clientHandler.FileOpns{DstSNList: dstSNList, SnChunkMap: snChunkMap})
 	} else if action == "get" {
-		if value, ok := fileSNMap[fileName]; ok {
-
-			msg := &clientHandler.FileOpns{
-				Checksum: checkSum,
-				DstSN:    value,
+		if SNChunkMapValue, ok := fileSNChunkMap[fileName]; ok {
+			if dstSNListValue, ok2 := fileSNMap[fileName]; ok2 {
+				msg := &clientHandler.FileOpns{
+					Checksum:   checkSum,
+					SnChunkMap: SNChunkMapValue,
+					DstSNList:  dstSNListValue,
+				}
+				handler.Send(msg)
 			}
-			handler.Send(msg)
+
 		} else {
 			// TODO : Probabily need to send a message to the client with the below message
 			fmt.Println("File not present, please insert a file")
