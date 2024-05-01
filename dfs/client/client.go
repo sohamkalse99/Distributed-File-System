@@ -88,7 +88,6 @@ func getStorageNodesDetails(handler *clientHandler.ClientHandler) []string {
 	}
 
 	dstSNList := fileOpnsMsg.GetDstSN()
-	fmt.Println("received the active sn list", dstSNList)
 	return dstSNList
 }
 
@@ -277,9 +276,11 @@ func main() {
 			sendFileDetails(handler, "put", filePath, chunkSize, fileSize, fileName, checkSum)
 			dstSNList := getStorageNodesDetails(handler)
 			chunkSNMap := createChunks(filePath, dstSNList, chunkSize, fileSize)
+			fmt.Println("Chunks created")
 			// fmt.Println("Map of chunks", chunkSNMap)
 			// uniqueSNList := getUniqueSN(dstSNList)
 			connectToSN(chunkSNMap, fileName)
+			fmt.Println("Chunks sent to respective storage nodes")
 		} else if strings.ToLower(strings.Trim(clientIp, "")) == "get" {
 			conn := connectToController(controllerPort)
 			defer conn.Close()

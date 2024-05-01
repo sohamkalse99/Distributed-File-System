@@ -6,7 +6,11 @@ const (
 	ControllerPortForClient = "30000"
 	StoragePath             = "/bigdata/students/skalse"
 	ChunkSize               = 500000
-	FilePath                = "/home/skalse/CS_677/Distributed-File-System/dfs/tempFile/temp"
-	GetFolderPath           = "/home/skalse/CS_677/Distributed-File-System/dfs/getPath"
-	GetFileName             = "get_file"
+	FilePath                = "/bigdata/mmalensek/logs/url-dataset-1m.txt"
+	// FilePath                = "/home/skalse/CS_677/Distributed-File-System/dfs/tempFile/temp"
+	// GetFolderPath = "/home/skalse/CS_677/temp/Distributed-File-System/dfs/getPath"
+	// GetFolderPath = "/home/skalse/CS_677/Distributed-File-System/dfs/getPath"
+	GetFolderPath = "/bigdata/students/skalse/getPath"
+
+	GetFileName = "get_file"
 )

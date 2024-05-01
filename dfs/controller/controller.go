@@ -120,7 +120,7 @@ func handleHeartbeat(handler *snHandler.StorageNodeHandler, wrapper *snHandler.W
 			fmt.Println("Failure. Reinitalize yourself as new node")
 
 		} else {
-			fmt.Println("Success")
+			// fmt.Println("Success")
 			snTimeMap[key] = currTimeFormatted
 
 		}
@@ -168,7 +168,7 @@ func handleStorageNode() {
 	go checkSNValidity()
 
 	for {
-		fmt.Println("Started an infinite loop to handle SN")
+		// fmt.Println("Started an infinite loop to handle SN")
 		if conn, connErr := snListner.Accept(); connErr == nil {
 			handler := snHandler.NewStorageNodeHandler(conn)
 			handleStorageNodeRequests(handler)
@@ -245,7 +245,6 @@ func handleClientRequests(handler *clientHandler.ClientHandler) {
 		dstSNListmsg := &clientHandler.FileOpns{
 			DstSN: dstSNList,
 		}
-		fmt.Println("Dest SN list", dstSNList)
 		handler.Send(dstSNListmsg)
 	} else if action == "get" {
 		if value, ok := fileSNMap[fileName]; ok {
@@ -269,7 +268,7 @@ func handleClient() {
 	}
 
 	for {
-		fmt.Println("Started an infinite loop to handle Client")
+		// fmt.Println("Started an infinite loop to handle Client")
 
 		if conn, connErr := clientListner.Accept(); connErr == nil {
 			fmt.Println("Accepted client")
