@@ -75,13 +75,17 @@ func sendRegReq(handler *snHandler.StorageNodeHandler, snHostname string, snPort
 	handler.Send(wrapperMsg)
 }
 
-func handleHeartbeat(snHandler *snHandler.StorageNodeHandler, snName string, snPortForClient string, storagePath string) {
+func handleHeartbeat(snHandler *snHandler.StorageNodeHandler, snName string, snPortForClient string, storagePath string, hbCounter *int) {
 
 	// Send a heartbeat every 5 seconds
 	// for {
 
 	sendHeartbeat(snHandler, storagePath, snName, snPortForClient)
-	fmt.Println("Heartbeat sent")
+	if *hbCounter%10 == 0 {
+		fmt.Println("Heartbeat sent")
+	}
+	*hbCounter = *hbCounter + 1
+
 	time.Sleep(5 * time.Second)
 	// }
 
@@ -109,10 +113,12 @@ func handleController() {
 	// TODO : Calculate number of requests processed (storage/retrievals)
 	// calculateRequestCount()
 	flag := true
+	hbCounter := 0
 	for {
 		conn := connectToController(controllerPort, snName, snPortForClient, storagePath)
 
 		handler := snHandler.NewStorageNodeHandler(conn)
+
 		if flag {
 			sendRegReq(handler, snName, snPortForClient)
 
@@ -120,13 +126,14 @@ func handleController() {
 
 			// Will receive an ok message if registration is successful
 			if wrapper.GetRegTask().Status == "ok" {
-				handleHeartbeat(handler, snName, snPortForClient, storagePath)
+				handleHeartbeat(handler, snName, snPortForClient, storagePath, &hbCounter)
+
 			} else {
 				fmt.Println("Register as new node")
 			}
 			flag = false
 		} else {
-			handleHeartbeat(handler, snName, snPortForClient, storagePath)
+			handleHeartbeat(handler, snName, snPortForClient, storagePath, &hbCounter)
 		}
 
 		conn.Close()
