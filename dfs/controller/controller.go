@@ -13,10 +13,19 @@ import (
 
 // var activeSNSet = make(map[string]bool)
 var snTimeMap = make(map[string]time.Time)
-var fileSNMap = make(map[string][]string)
+var fileSNMap = make(map[string][]string)                                      //Initialized during put operation, used during get operation. Used to map file name and orions
 var fileSNChunkMap = make(map[string]map[string]*clientHandler.FileOpnsChunks) // {temp:{orion01:[temp_chunk_1, temp_chunk_2]}}
-var snChunkMap = make(map[string]*clientHandler.FileOpnsChunks)
+var snChunkMap = make(map[string]*clientHandler.FileOpnsChunks)                //Stores storage node names and list of chunks
 var checkSum []byte
+
+// Replication
+var fellowsnSNMap = make(map[string]*clientHandler.FileOpnsFellowSNNames)
+var replicaFileSNReplicaChunks = make(map[string]map[string]*clientHandler.FileOpnsReplicaList)
+var replicaSNChunkMap = make(map[string]*clientHandler.FileOpnsReplicaList) // will map storage node name and the replica chunks
+var snSNSet = make(map[string]bool)
+var fellowSNPortMap = make(map[string]string)
+var clientSNPortMap = make(map[string]string)
+var replicaNameMap = make(map[string]*clientHandler.FileOpnsReplicaName) //Stores storage node names and list of names replica chunks, used for put
 
 func checkSNValidity() {
 
@@ -53,8 +62,8 @@ func registerStorageNode(handler *snHandler.StorageNodeHandler, snName string, s
 		log.Fatalln(formatErr)
 	}
 	// if element is present in snTimeMap, and the diff > 15sec then do not change the activSNSet
-	element := snName + ":" + snPortNo
-
+	element := snName
+	// element2 := snName
 	if value, ok := snTimeMap[element]; ok {
 		diff := currTimeFormatted.Sub(value)
 		fmt.Println("Time diff", diff)
@@ -64,6 +73,7 @@ func registerStorageNode(handler *snHandler.StorageNodeHandler, snName string, s
 			// activeSNSet[element] = true
 			// Set current time to snTimeMap
 			snTimeMap[element] = currTimeFormatted
+			snSNSet[element] = true
 			fmt.Println(element, " registered")
 			// Send an ok message
 
@@ -77,6 +87,7 @@ func registerStorageNode(handler *snHandler.StorageNodeHandler, snName string, s
 
 			handler.Send(wrapper)
 		} else {
+			snSNSet[element] = false
 			fmt.Println("Cannot register as time diff greater than 15 secs")
 		}
 	} else {
@@ -87,6 +98,7 @@ func registerStorageNode(handler *snHandler.StorageNodeHandler, snName string, s
 
 		// set current time in snTimeMap
 		snTimeMap[element] = currTimeFormatted
+		snSNSet[element] = true
 		fmt.Println(element, " registered")
 		// Send an ok message
 		okMsg := &snHandler.Registration{Status: "ok"}
@@ -106,8 +118,21 @@ func handleHeartbeat(handler *snHandler.StorageNodeHandler, wrapper *snHandler.W
 
 	snName := wrapper.GetHeartbeatTask().StorageNodeName
 	snPort := wrapper.GetHeartbeatTask().StoragePortNumber
+	snPortForFellowSN := wrapper.GetHeartbeatTask().SnFellowPN
+
+	// Check if fellowSNport exist in the map for the orion name
+	if _, ok := fellowSNPortMap[snName]; !ok {
+		fellowSNPortMap[snName] = snPortForFellowSN
+	}
+
+	// Check if clientSNport exist in the map for the orion name
+	if _, ok := clientSNPortMap[snName]; !ok {
+		clientSNPortMap[snName] = snPort
+	}
+
 	// chunkNames := wrapper.GetHeartbeatTask().ChunkNames
-	key := snName + ":" + snPort
+	key := snName
+	// key2 := snName
 	// if _, ok := activeSNSet[key]; ok {
 
 	currTime := time.Now().Format("2006-01-02 15:04:05")
@@ -120,11 +145,11 @@ func handleHeartbeat(handler *snHandler.StorageNodeHandler, wrapper *snHandler.W
 		// fmt.Println("Time diff", diff)
 		if diff > 15*time.Second {
 			fmt.Println("Failure. Reinitalize yourself as new node")
-
+			snSNSet[key] = false
 		} else {
 			// fmt.Println("Success")
 			snTimeMap[key] = currTimeFormatted
-
+			snSNSet[key] = true
 		}
 	} else {
 		fmt.Println("You need to register before sending the heartbeat")
@@ -244,6 +269,82 @@ func createSNChunkMap(dstSNList []string, chunkSlice []string, handler *clientHa
 	}
 
 }
+
+func createReplicaChunkNames(chunkSlice []string, dstSNList []string) {
+	replicaNameSlice := make([]string, len(chunkSlice))
+	for i := range chunkSlice {
+		replicaNameSlice[i] = fmt.Sprintf("replica_%s", chunkSlice[i])
+		// fmt.Println(replicaNameSlice[i])
+	}
+
+	for i := 0; i < len(replicaNameSlice); i++ {
+		if values, ok := replicaNameMap[dstSNList[i]]; ok {
+			values.ReplicaNameList = append(values.ReplicaNameList, replicaNameSlice[i])
+
+			replicaNameMap[dstSNList[i]] = values
+		} else {
+			arr := []string{}
+			arr = append(arr, replicaNameSlice[i])
+			//add list which of type fileopnschunk to the map
+			replicaNameMap[dstSNList[i]] = &clientHandler.FileOpnsReplicaName{ReplicaNameList: arr}
+		}
+
+	}
+
+}
+func createSNMapping() {
+	list := []string{}
+
+	for val := range snSNSet {
+		list = append(list, val)
+	}
+	for i, value := range list {
+		neighbors := []string{}
+		neighbors = append(neighbors, list[(i+1)%len(list)])
+		neighbors = append(neighbors, list[(i+2)%len(list)])
+
+		// snChunkMap[dstSNList[i]] = &clientHandler.FileOpnsChunks{ChunkList: arr}
+
+		fellowsnSNMap[value] = &clientHandler.FileOpnsFellowSNNames{Fellow_SNNamesList: neighbors}
+		// replicasnSNMap[value].Fellow_SNNamesList = neighbors
+	}
+}
+
+func createSNReplicaMapping(fileName string) {
+
+	for key, snList := range fellowsnSNMap {
+		if innerMap, ok := fileSNChunkMap[fileName]; ok {
+			if innerList, ok := innerMap[key]; ok {
+				arr := []string{}
+				if len(snList.Fellow_SNNamesList) == 2 {
+					for _, element := range innerList.ChunkList {
+						replicaChunkName := fmt.Sprintf("replica_%s", element)
+						arr = append(arr, replicaChunkName)
+					}
+
+					if val1, ok := replicaSNChunkMap[snList.Fellow_SNNamesList[0]]; ok {
+						val1.ReplicaChunkList = append(val1.ReplicaChunkList, arr...)
+						replicaSNChunkMap[snList.Fellow_SNNamesList[0]] = val1
+					} else {
+						replicaSNChunkMap[snList.Fellow_SNNamesList[0]] = &clientHandler.FileOpnsReplicaList{ReplicaChunkList: arr}
+					}
+
+					if val2, ok := replicaSNChunkMap[snList.Fellow_SNNamesList[1]]; ok {
+						val2.ReplicaChunkList = append(val2.ReplicaChunkList, arr...)
+						replicaSNChunkMap[snList.Fellow_SNNamesList[1]] = val2
+					} else {
+						replicaSNChunkMap[snList.Fellow_SNNamesList[1]] = &clientHandler.FileOpnsReplicaList{ReplicaChunkList: arr}
+					}
+
+				}
+			}
+		}
+	}
+
+	if _, ok := replicaFileSNReplicaChunks[fileName]; !ok {
+		replicaFileSNReplicaChunks[fileName] = replicaSNChunkMap
+	}
+}
 func handleClientPutReq(chunkSize int64, fileSize int64, fileName string, handler *clientHandler.ClientHandler) []string {
 	// fmt.Println("file size", fileSize)
 	// fmt.Println("chunk size", chunkSize)
@@ -257,6 +358,11 @@ func handleClientPutReq(chunkSize int64, fileSize int64, fileName string, handle
 	chunkSlice := getChunkSlice(fileName, noOfChunks)
 	createSNChunkMap(dstSNList, chunkSlice, handler)
 	mapFileSNAndChunks(fileName, noOfChunks, activeSNList, chunkSlice)
+
+	//Get Replication Data
+	createSNMapping()
+	createSNReplicaMapping(fileName)
+	createReplicaChunkNames(chunkSlice, dstSNList)
 
 	return dstSNList
 }
@@ -280,14 +386,15 @@ func handleClientRequests(handler *clientHandler.ClientHandler) {
 		// add to the map
 		fileSNMap[fileName] = dstSNList
 
-		handler.Send(&clientHandler.FileOpns{DstSNList: dstSNList, SnChunkMap: snChunkMap})
+		handler.Send(&clientHandler.FileOpns{DstSNList: dstSNList, SnChunkMap: snChunkMap, ReplicaSNChunkMap: replicaSNChunkMap, FellowSNNamesMap: fellowsnSNMap, FellowsnPortMap: fellowSNPortMap, ClientsnPortMap: clientSNPortMap, ReplicaNameMap: replicaNameMap})
 	} else if action == "get" {
 		if SNChunkMapValue, ok := fileSNChunkMap[fileName]; ok {
 			if dstSNListValue, ok2 := fileSNMap[fileName]; ok2 {
 				msg := &clientHandler.FileOpns{
-					Checksum:   checkSum,
-					SnChunkMap: SNChunkMapValue,
-					DstSNList:  dstSNListValue,
+					Checksum:        checkSum,
+					SnChunkMap:      SNChunkMapValue,
+					DstSNList:       dstSNListValue,
+					ClientsnPortMap: clientSNPortMap,
 				}
 				handler.Send(msg)
 			}
