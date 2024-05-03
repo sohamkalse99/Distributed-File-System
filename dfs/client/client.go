@@ -80,7 +80,7 @@ func sendFileDetails(handler *clientHandler.ClientHandler, action string, filePa
 
 }
 
-func getStorageNodesDetails(handler *clientHandler.ClientHandler) ([]string, map[string]*clientHandler.FileOpnsChunks) {
+func getStorageNodesDetails(handler *clientHandler.ClientHandler) ([]string, map[string]*clientHandler.FileOpnsChunks, map[string]*clientHandler.FileOpnsReplicaList, map[string]*clientHandler.FileOpnsFellowSNNames, map[string]string, map[string]string, map[string]*clientHandler.FileOpnsReplicaName) {
 	fileOpnsMsg, err := handler.Receive()
 
 	if err != nil {
@@ -89,7 +89,12 @@ func getStorageNodesDetails(handler *clientHandler.ClientHandler) ([]string, map
 
 	dstSNList := fileOpnsMsg.GetDstSNList()
 	snChunkNamesMap := fileOpnsMsg.GetSnChunkMap()
-	return dstSNList, snChunkNamesMap
+	replicaSNChunkMap := fileOpnsMsg.GetReplicaSNChunkMap()
+	fellowSNNamesMap := fileOpnsMsg.GetFellowSNNamesMap()
+	fellowSNPortMap := fileOpnsMsg.GetFellowsnPortMap()
+	clientSNPortMap := fileOpnsMsg.GetClientsnPortMap()
+	replicaNameMap := fileOpnsMsg.GetReplicaNameMap()
+	return dstSNList, snChunkNamesMap, replicaSNChunkMap, fellowSNNamesMap, fellowSNPortMap, clientSNPortMap, replicaNameMap
 }
 
 func createChunks(filePath string, dstSNList []string, chunkSize int64, fileSize int64) map[string][][]byte {
@@ -133,24 +138,36 @@ func createChunks(filePath string, dstSNList []string, chunkSize int64, fileSize
 	return chunkDataSNMap
 }
 
-func connectToSN(chunkDataSNMap map[string][][]byte, snChunkNamesMap map[string]*clientHandler.FileOpnsChunks, fileName string) {
+func connectToSN(chunkDataSNMap map[string][][]byte, snChunkNamesMap map[string]*clientHandler.FileOpnsChunks, replicaNameMap map[string]*clientHandler.FileOpnsReplicaName, fileName string, replicaSNChunkMap map[string]*clientHandler.FileOpnsReplicaList, fellowSNNamesMap map[string]*clientHandler.FileOpnsFellowSNNames, fellowSNPortMap map[string]string, clientSNPortMap map[string]string) {
 	action := "put"
-	for key, value1 := range chunkDataSNMap {
-		if value2, ok := snChunkNamesMap[key]; ok {
-			conn, err := net.Dial("tcp", key)
 
-			if err != nil {
-				log.Fatalln(err.Error())
-			}
+	for key, chunkDataList := range chunkDataSNMap {
+		if chunkNameList, ok := snChunkNamesMap[key]; ok {
 
-			handler := clientSNHandler.NewClientSNHandler(conn)
-			msg := &clientSNHandler.ChunkDetails{
-				FileName:       fileName,
-				ChunkDataArray: value1,
-				ChunkNameArray: value2.GetChunkList(),
-				Action:         action,
+			if replicaNameList, ok := replicaNameMap[key]; ok {
+				if port, ok := clientSNPortMap[key]; ok {
+					conn, err := net.Dial("tcp", key+":"+port)
+
+					if err != nil {
+						log.Fatalln(err.Error())
+					}
+
+					handler := clientSNHandler.NewClientSNHandler(conn)
+					snName := strings.Split(key, ":")[0]
+					msg := &clientSNHandler.ChunkDetails{
+						FileName:              fileName,
+						ChunkDataArray:        chunkDataList,
+						ChunkNameArray:        chunkNameList.GetChunkList(),
+						ReplicaNameArray:      replicaNameList.GetReplicaNameList(),
+						ReplicaChunkNameArray: replicaSNChunkMap[snName].GetReplicaChunkList(),
+						Fellow_SNNamesList:    fellowSNNamesMap[snName].GetFellow_SNNamesList(),
+						FellowsnPortMap:       fellowSNPortMap,
+						ClientsnPortMap:       clientSNPortMap,
+						Action:                action,
+					}
+					handler.Send(msg)
+				}
 			}
-			handler.Send(msg)
 
 		}
 	}
@@ -165,7 +182,7 @@ func sendGetMsg(fileName string, clientContHandler *clientHandler.ClientHandler)
 	clientContHandler.Send(getMsg)
 }
 
-func getSNDetails(fileName string, clientContHandler *clientHandler.ClientHandler) ([]string, []byte, map[string]*clientHandler.FileOpnsChunks) {
+func getSNDetails(fileName string, clientContHandler *clientHandler.ClientHandler) ([]string, []byte, map[string]*clientHandler.FileOpnsChunks, map[string]string) {
 	controllerMsg, err := clientContHandler.Receive()
 
 	if err != nil {
@@ -174,7 +191,8 @@ func getSNDetails(fileName string, clientContHandler *clientHandler.ClientHandle
 	checkSum := controllerMsg.GetChecksum()
 	dstSNList := controllerMsg.GetDstSNList()
 	snChunkMap := controllerMsg.GetSnChunkMap()
-	return dstSNList, checkSum, snChunkMap
+	clientSNPortMap := controllerMsg.GetClientsnPortMap()
+	return dstSNList, checkSum, snChunkMap, clientSNPortMap
 }
 
 func getChunkFromSN(handler *clientSNHandler.ClientSNHandler, sn string, wg *sync.WaitGroup) {
@@ -187,28 +205,31 @@ func getChunkFromSN(handler *clientSNHandler.ClientSNHandler, sn string, wg *syn
 
 	SNChunkArrMap[sn] = chunkDataArr
 }
-func sendMsgToSN(fileName string, dstSNList []string, snChunkMap map[string]*clientHandler.FileOpnsChunks) {
+func sendMsgToSN(fileName string, dstSNList []string, snChunkMap map[string]*clientHandler.FileOpnsChunks, clientSNPortMap map[string]string) {
 	action := "get"
 	var wg sync.WaitGroup
 	for sn := range uniqueSNMap {
 
-		if value, ok := snChunkMap[sn]; ok {
-			conn, err := net.Dial("tcp", sn)
-			if err != nil {
-				log.Fatalln(err.Error())
+		if list, ok := snChunkMap[sn]; ok {
+			if port, ok := clientSNPortMap[sn]; ok {
+				conn, err := net.Dial("tcp", sn+":"+port)
+				if err != nil {
+					log.Fatalln(err.Error())
+				}
+
+				handler := clientSNHandler.NewClientSNHandler(conn)
+
+				snMsg := &clientSNHandler.ChunkDetails{
+					FileName:       fileName,
+					Action:         action,
+					ChunkNameArray: list.ChunkList,
+				}
+
+				handler.Send(snMsg)
+				wg.Add(1)
+				go getChunkFromSN(handler, sn, &wg)
 			}
 
-			handler := clientSNHandler.NewClientSNHandler(conn)
-
-			snMsg := &clientSNHandler.ChunkDetails{
-				FileName:       fileName,
-				Action:         action,
-				ChunkNameArray: value.ChunkList,
-			}
-
-			handler.Send(snMsg)
-			wg.Add(1)
-			go getChunkFromSN(handler, sn, &wg)
 		} else {
 			fmt.Println("Did not find key in snChunkMap")
 		}
@@ -289,12 +310,12 @@ func main() {
 			fileSize := calcFileSize(filePath)
 			checkSum := calcCheckSum(filePath)
 			sendFileDetails(handler, "put", filePath, chunkSize, fileSize, fileName, checkSum)
-			dstSNList, snChunkNamesMap := getStorageNodesDetails(handler)
+			dstSNList, snChunkNamesMap, replicaSNChunkMap, fellowSNNamesMap, fellowSNPortMap, clientSNPortMap, replicaNameMap := getStorageNodesDetails(handler)
 			chunkDataSNMap := createChunks(filePath, dstSNList, chunkSize, fileSize)
 			fmt.Println("Chunks created")
 			// fmt.Println("Map of chunks", chunkSNMap)
 			// uniqueSNList := getUniqueSN(dstSNList)
-			connectToSN(chunkDataSNMap, snChunkNamesMap, fileName)
+			connectToSN(chunkDataSNMap, snChunkNamesMap, replicaNameMap, fileName, replicaSNChunkMap, fellowSNNamesMap, fellowSNPortMap, clientSNPortMap)
 			fmt.Println("Chunks sent to respective storage nodes")
 		} else if strings.ToLower(strings.Trim(clientIp, "")) == "get" {
 			conn := connectToController(controllerPort)
@@ -303,7 +324,7 @@ func main() {
 			clientContHandler := clientHandler.NewClientHandler(conn)
 			sendGetMsg(fileName, clientContHandler)
 
-			dstSNList, checkSum, snChunkMap := getSNDetails(fileName, clientContHandler)
+			dstSNList, checkSum, snChunkMap, clientSNPortMap := getSNDetails(fileName, clientContHandler)
 
 			// Create a unique map of SN's as you want to send requests to unique SN's
 			for _, element := range dstSNList {
@@ -311,7 +332,7 @@ func main() {
 					uniqueSNMap[element] = true
 				}
 			}
-			sendMsgToSN(fileName, dstSNList, snChunkMap)
+			sendMsgToSN(fileName, dstSNList, snChunkMap, clientSNPortMap)
 			createFileFromChunks(fileName, dstSNList, checkSum)
 		}
 
