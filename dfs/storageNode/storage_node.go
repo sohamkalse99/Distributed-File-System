@@ -11,9 +11,18 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
+
+var chunkNameArr []string
+var replicaNameArr []string
+var chunkDataArr [][]byte
+var replicaChunkNameArr []string
+var fellowSNNamesList []string
+
+// var SNPortMap = make(map[string]string)
 
 func calculateFreeSpace(storagePath string) (uint64, error) {
 	var stat syscall.Statfs_t
@@ -27,7 +36,7 @@ func calculateFreeSpace(storagePath string) (uint64, error) {
 	return stat.Bavail * uint64(stat.Bsize), nil
 }
 
-func sendHeartbeat(handler *snHandler.StorageNodeHandler, storagePath string, snHostname string, snPortForClient string) {
+func sendHeartbeat(handler *snHandler.StorageNodeHandler, storagePath string, snHostname string, snPortForClient string, snPortForFellowSN string) {
 	// defer snHandler.Close()
 
 	// Calculate Free space
@@ -38,7 +47,7 @@ func sendHeartbeat(handler *snHandler.StorageNodeHandler, storagePath string, sn
 
 	// Create a Heartbeat wrapper, for now you can create something temporary
 
-	heartbeatMsg := &snHandler.Heartbeat{StorageNodeName: snHostname, SpaceAvailability: freeSpace, StoragePortNumber: snPortForClient}
+	heartbeatMsg := &snHandler.Heartbeat{StorageNodeName: snHostname, SpaceAvailability: freeSpace, StoragePortNumber: snPortForClient, SnFellowPN: snPortForFellowSN}
 
 	wrapperMsg := &snHandler.Wrapper{
 		Task: &snHandler.Wrapper_HeartbeatTask{
@@ -62,9 +71,9 @@ func connectToController(controllerPort string, snHostname string, snPortForClie
 
 }
 
-func sendRegReq(handler *snHandler.StorageNodeHandler, snHostname string, snPortForClient string) {
+func sendRegReq(handler *snHandler.StorageNodeHandler, snHostname string, snPortForClient string, snPortForFellowSN string) {
 
-	registrationMsg := &snHandler.Registration{StorageNodeName: snHostname, StoragePortNumber: snPortForClient}
+	registrationMsg := &snHandler.Registration{StorageNodeName: snHostname, StoragePortNumber: snPortForClient, SnFellowPN: snPortForFellowSN}
 
 	wrapperMsg := &snHandler.Wrapper{
 		Task: &snHandler.Wrapper_RegTask{
@@ -75,12 +84,12 @@ func sendRegReq(handler *snHandler.StorageNodeHandler, snHostname string, snPort
 	handler.Send(wrapperMsg)
 }
 
-func handleHeartbeat(snHandler *snHandler.StorageNodeHandler, snName string, snPortForClient string, storagePath string, hbCounter *int) {
+func handleHeartbeat(snHandler *snHandler.StorageNodeHandler, snName string, snPortForClient string, snPortForFellowSN string, storagePath string, hbCounter *int) {
 
 	// Send a heartbeat every 5 seconds
 	// for {
 
-	sendHeartbeat(snHandler, storagePath, snName, snPortForClient)
+	sendHeartbeat(snHandler, storagePath, snName, snPortForClient, snPortForFellowSN)
 	if *hbCounter%10 == 0 {
 		fmt.Println("Heartbeat sent")
 	}
@@ -91,7 +100,8 @@ func handleHeartbeat(snHandler *snHandler.StorageNodeHandler, snName string, snP
 
 }
 
-func handleController() {
+func handleController(wg *sync.WaitGroup) {
+	defer wg.Done()
 	snName, hnErr := os.Hostname()
 	snName = strings.Split(snName, ".")[0]
 	if hnErr != nil {
@@ -99,6 +109,8 @@ func handleController() {
 	}
 	snPort := os.Args[1]
 	snPortForClient := os.Args[2]
+	snPortForFellowSN := os.Args[3]
+
 	_, err := net.Listen("tcp", ":"+snPort)
 
 	if err != nil {
@@ -120,24 +132,57 @@ func handleController() {
 		handler := snHandler.NewStorageNodeHandler(conn)
 
 		if flag {
-			sendRegReq(handler, snName, snPortForClient)
+			sendRegReq(handler, snName, snPortForClient, snPortForFellowSN)
 
 			wrapper, _ := handler.Receive()
 
 			// Will receive an ok message if registration is successful
 			if wrapper.GetRegTask().Status == "ok" {
-				handleHeartbeat(handler, snName, snPortForClient, storagePath, &hbCounter)
+				handleHeartbeat(handler, snName, snPortForClient, snPortForFellowSN, storagePath, &hbCounter)
 
 			} else {
 				fmt.Println("Register as new node")
 			}
 			flag = false
 		} else {
-			handleHeartbeat(handler, snName, snPortForClient, storagePath, &hbCounter)
+			handleHeartbeat(handler, snName, snPortForClient, snPortForFellowSN, storagePath, &hbCounter)
 		}
 
 		conn.Close()
 	}
+}
+
+func sendDataToFellowSN(fellowSNPortMap map[string]string, clientSNPortMap map[string]string) {
+	// replicaChunkNameArr, chunkDataArr, fellowSNNamesList
+
+	for _, sn := range fellowSNNamesList {
+
+		if value, ok := fellowSNPortMap[sn]; ok {
+
+			snNameAndPort := sn + ":" + value
+
+			conn, err := net.Dial("tcp", snNameAndPort)
+			if err != nil {
+				fmt.Println("Inside sendDataToFellowSN")
+				log.Fatalln(err.Error())
+			}
+			handler := snHandler.NewStorageNodeHandler(conn)
+
+			wrapper := &snHandler.Wrapper{
+				Task: &snHandler.Wrapper_FellowSNTask{
+					FellowSNTask: &snHandler.FellowSNMsg{
+						Data:            chunkDataArr,
+						ReplicaNames:    replicaNameArr,
+						ClientsnPortMap: clientSNPortMap,
+						SnName:          sn,
+					},
+				},
+			}
+			handler.Send(wrapper)
+		}
+
+	}
+
 }
 
 func handleClientRequests(handler *clientSNHandler.ClientSNHandler, snPortForClient string) {
@@ -149,12 +194,19 @@ func handleClientRequests(handler *clientSNHandler.ClientSNHandler, snPortForCli
 	}
 	// fileName := chunkDetailsMsg.GetFileName()
 	action := chunkDetailsMsg.GetAction()
-	chunkNameArr := chunkDetailsMsg.GetChunkNameArray()
-
+	chunkNameArr = chunkDetailsMsg.GetChunkNameArray()
+	replicaNameArr = chunkDetailsMsg.GetReplicaNameArray()
 	if action == "put" {
-		chunkDataArr := chunkDetailsMsg.GetChunkDataArray()
-
+		chunkDataArr = chunkDetailsMsg.GetChunkDataArray()
+		replicaChunkNameArr = chunkDetailsMsg.GetReplicaChunkNameArray()
+		fellowSNNamesList = chunkDetailsMsg.GetFellow_SNNamesList()
+		fellowSNPortMap := chunkDetailsMsg.GetFellowsnPortMap()
+		clientSNPortMap := chunkDetailsMsg.GetClientsnPortMap()
 		noOfChunks := len(chunkDataArr)
+
+		// Send replicas to fellow SN on sepearte threads
+		go sendDataToFellowSN(fellowSNPortMap, clientSNPortMap)
+
 		for i := 0; i < noOfChunks; i++ {
 			chunkFullName := fmt.Sprintf("%s/%s", config.StoragePath, chunkNameArr[i])
 
@@ -219,7 +271,8 @@ func handleClientRequests(handler *clientSNHandler.ClientSNHandler, snPortForCli
 	}
 
 }
-func handleClient() {
+func handleClient(wg *sync.WaitGroup) {
+	defer wg.Done()
 	snPortForClient := os.Args[2]
 
 	clientListner, err := net.Listen("tcp", ":"+snPortForClient)
@@ -238,9 +291,78 @@ func handleClient() {
 	}
 
 }
+
+func handleFellowSNRequests(handler *snHandler.StorageNodeHandler) {
+	var snDataMap = make(map[string][][]byte)
+
+	defer handler.Close()
+	fellowSNMsg, err := handler.Receive()
+	if err != nil {
+		fmt.Println("Inside handle fellow err 2")
+
+		log.Fatalln(err)
+	}
+
+	//Replica names and data
+	replicaNameArr := fellowSNMsg.GetFellowSNTask().GetReplicaNames()
+	chunkArr := fellowSNMsg.GetFellowSNTask().GetData()
+	sn := fellowSNMsg.GetFellowSNTask().GetSnName()
+
+	if _, ok := snDataMap[sn]; !ok {
+		snDataMap[sn] = chunkArr
+	}
+
+	// fmt.Println("chunkNameslice", chunkNameSlice)
+	// fmt.Println("length of chunk arr", len(chunkArr))
+
+	for i := 0; i < len(replicaNameArr); i++ {
+
+		chunkFullName := fmt.Sprintf("%s/%s", config.StoragePath, replicaNameArr[i])
+
+		// file, createErr := os.Create(fileName)
+		writeErr := os.WriteFile(chunkFullName, chunkArr[i], 0644)
+
+		if writeErr != nil {
+			fmt.Println("Inside handle fellow err 3")
+
+			log.Fatalln(writeErr.Error())
+		} else {
+			fmt.Println("Replica Chunks Created: ", replicaNameArr[i])
+		}
+	}
+}
+
+func handleFellowSN(wg *sync.WaitGroup) {
+	defer wg.Done()
+	snPortForClient := os.Args[3]
+
+	felowSNListner, err := net.Listen("tcp", ":"+snPortForClient)
+
+	if err != nil {
+		fmt.Println("Inside handle fellow err")
+		log.Fatalln(err.Error())
+	}
+
+	for {
+		fmt.Println("Started an infinite loop to handle Fellow SN")
+		if conn, connErr := felowSNListner.Accept(); connErr == nil {
+			fmt.Println("Accepted a SN")
+			handler := snHandler.NewStorageNodeHandler(conn)
+			handleFellowSNRequests(handler)
+		} else {
+			fmt.Println("Inside err")
+		}
+	}
+}
 func main() {
+	var wg sync.WaitGroup
 
-	go handleController()
-	handleClient()
+	wg.Add(3)
+	go handleController(&wg)
+	go handleClient(&wg)
 
+	//When you get the list/Map of storage nodes, then only you startlistening to fellow storage nodes
+
+	go handleFellowSN(&wg)
+	wg.Wait()
 }
