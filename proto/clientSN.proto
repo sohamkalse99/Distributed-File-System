@@ -6,5 +6,13 @@ message ChunkDetails {
     repeated bytes chunk_data_array = 2;
     repeated string chunk_name_array = 3;
 
-    string action = 4;
+    repeated string replica_name_array = 4;
+    repeated string replica_chunk_name_array = 5;
+    string action = 6;
+
+    repeated string fellow_SNNames_list = 7;
+
+    map<string, string> fellowsnPortMap = 8;
+    map<string, string> clientsnPortMap = 9;
+
 }
