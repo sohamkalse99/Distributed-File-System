@@ -300,8 +300,12 @@ func createSNMapping() {
 	}
 	for i, value := range list {
 		neighbors := []string{}
+
 		neighbors = append(neighbors, list[(i+1)%len(list)])
-		neighbors = append(neighbors, list[(i+2)%len(list)])
+
+		if len(list) > 2 {
+			neighbors = append(neighbors, list[(i+2)%len(list)])
+		}
 
 		// snChunkMap[dstSNList[i]] = &clientHandler.FileOpnsChunks{ChunkList: arr}
 
