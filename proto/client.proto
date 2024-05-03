@@ -13,4 +13,21 @@ message FileOpns {
         repeated string chunkList = 1; 
     }
     
+    map<string, replicaName> replicaNameMap = 8;
+    message replicaName {
+        repeated string replicaNameList = 1; 
+    }
+    /*Might be used for get*/
+    map<string, replica_list> replicaSNChunkMap = 9;
+    message replica_list {
+        repeated string replica_chunk_list = 1;
+    }
+
+    map<string, fellowSNNames> fellowSNNamesMap = 10;
+    message fellowSNNames {
+        repeated string fellow_SNNames_list = 1;
+    }
+
+    map<string, string> fellowsnPortMap = 11;
+    map<string, string> clientsnPortMap = 12;
 }
