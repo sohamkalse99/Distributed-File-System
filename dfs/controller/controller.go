@@ -29,6 +29,7 @@ var replicaNameMap = make(map[string]*clientHandler.FileOpnsReplicaName) //Store
 
 func checkSNValidity() {
 
+	// As we are just reading from the map, there is no problem of race condition
 	for {
 		currTime := time.Now().Format("2006-01-02 15:04:05")
 		currTimeFormatted, formatErr := time.Parse("2006-01-02 15:04:05", currTime)
@@ -42,7 +43,6 @@ func checkSNValidity() {
 			diff := currTimeFormatted.Sub(value)
 			if diff > 15*time.Second {
 				fmt.Println(key, "is Off", "Reinitalize yourself as new node")
-				// activeSNSet[key] = false
 			} else {
 				fmt.Println(key, "is On")
 			}
@@ -61,16 +61,17 @@ func registerStorageNode(handler *snHandler.StorageNodeHandler, snName string, s
 	if formatErr != nil {
 		log.Fatalln(formatErr)
 	}
-	// if element is present in snTimeMap, and the diff > 15sec then do not change the activSNSet
 	element := snName
 	// element2 := snName
+
+	/*if element already is already present in time map, check the difference between it's time and current time, if it is less that 15 secs, send and ok message
+	  else enter the current time in the map and send an ok message*/
 	if value, ok := snTimeMap[element]; ok {
 		diff := currTimeFormatted.Sub(value)
 		fmt.Println("Time diff", diff)
 
 		if diff < 15*time.Second {
 			// Add SNname to the set
-			// activeSNSet[element] = true
 			// Set current time to snTimeMap
 			snTimeMap[element] = currTimeFormatted
 			snSNSet[element] = true
@@ -120,20 +121,20 @@ func handleHeartbeat(handler *snHandler.StorageNodeHandler, wrapper *snHandler.W
 	snPort := wrapper.GetHeartbeatTask().StoragePortNumber
 	snPortForFellowSN := wrapper.GetHeartbeatTask().SnFellowPN
 
-	// Check if fellowSNport exist in the map for the orion name
+	/* Check if fellowSNport exist in the map for the orion name, if not then add the name and snPortForFellowSN to the map
+	eg: {orion01:40000}*/
 	if _, ok := fellowSNPortMap[snName]; !ok {
 		fellowSNPortMap[snName] = snPortForFellowSN
 	}
 
-	// Check if clientSNport exist in the map for the orion name
+	/* Check if snPort where sn is listening for client exist in the map for the orion name, if not then add the name and snPortForFellowSN to the map
+	eg: {orion01:25000}*/
 	if _, ok := clientSNPortMap[snName]; !ok {
 		clientSNPortMap[snName] = snPort
 	}
 
-	// chunkNames := wrapper.GetHeartbeatTask().ChunkNames
 	key := snName
 	// key2 := snName
-	// if _, ok := activeSNSet[key]; ok {
 
 	currTime := time.Now().Format("2006-01-02 15:04:05")
 	currTimeFormatted, formatErr := time.Parse("2006-01-02 15:04:05", currTime)
@@ -142,7 +143,6 @@ func handleHeartbeat(handler *snHandler.StorageNodeHandler, wrapper *snHandler.W
 	}
 	if value, ok := snTimeMap[key]; ok {
 		diff := currTimeFormatted.Sub(value)
-		// fmt.Println("Time diff", diff)
 		if diff > 15*time.Second {
 			fmt.Println("Failure. Reinitalize yourself as new node")
 			snSNSet[key] = false
@@ -154,8 +154,6 @@ func handleHeartbeat(handler *snHandler.StorageNodeHandler, wrapper *snHandler.W
 	} else {
 		fmt.Println("You need to register before sending the heartbeat")
 	}
-
-	// }
 
 }
 
@@ -172,7 +170,6 @@ func handleStorageNodeRequests(handler *snHandler.StorageNodeHandler) {
 		snName := task.RegTask.StorageNodeName
 		snPortNo := task.RegTask.StoragePortNumber
 		registerStorageNode(handler, snName, snPortNo)
-		// handleStorageNode(snHandler, snTimeMap, activeSNSet)
 	case *snHandler.Wrapper_HeartbeatTask:
 		handleHeartbeat(handler, wrapper)
 	case nil:
@@ -185,13 +182,14 @@ func handleStorageNodeRequests(handler *snHandler.StorageNodeHandler) {
 
 func handleStorageNode() {
 	snListner, snListnerErr := net.Listen("tcp", ":"+config.ControllerPortForSN)
-
+	fmt.Println("Listening for storage node on Port: ", config.ControllerPortForSN)
 	if snListnerErr != nil {
 		log.Fatalln(snListnerErr.Error())
 	}
 
 	// Used to store SN name and latest time of heartbeat
 
+	//Keep on check which storage nodes are active and which aren't on a seperate thread
 	go checkSNValidity()
 
 	for {
@@ -274,7 +272,6 @@ func createReplicaChunkNames(chunkSlice []string, dstSNList []string) {
 	replicaNameSlice := make([]string, len(chunkSlice))
 	for i := range chunkSlice {
 		replicaNameSlice[i] = fmt.Sprintf("replica_%s", chunkSlice[i])
-		// fmt.Println(replicaNameSlice[i])
 	}
 
 	for i := 0; i < len(replicaNameSlice); i++ {
@@ -307,10 +304,7 @@ func createSNMapping() {
 			neighbors = append(neighbors, list[(i+2)%len(list)])
 		}
 
-		// snChunkMap[dstSNList[i]] = &clientHandler.FileOpnsChunks{ChunkList: arr}
-
 		fellowsnSNMap[value] = &clientHandler.FileOpnsFellowSNNames{Fellow_SNNamesList: neighbors}
-		// replicasnSNMap[value].Fellow_SNNamesList = neighbors
 	}
 }
 
@@ -350,11 +344,8 @@ func createSNReplicaMapping(fileName string) {
 	}
 }
 func handleClientPutReq(chunkSize int64, fileSize int64, fileName string, handler *clientHandler.ClientHandler) []string {
-	// fmt.Println("file size", fileSize)
-	// fmt.Println("chunk size", chunkSize)
 
 	noOfChunks := int64(math.Ceil(float64(fileSize) / float64(chunkSize)))
-	// fmt.Println("no of chunks", noOfChunks)
 	activeSNList := getActiveSNList()
 
 	dstSNList := getDestinationSN(noOfChunks)
@@ -411,6 +402,7 @@ func handleClientRequests(handler *clientHandler.ClientHandler) {
 }
 func handleClient() {
 	clientListner, clientListnerErr := net.Listen("tcp", ":"+config.ControllerPortForClient)
+	fmt.Println("Listening for client on Port: ", config.ControllerPortForClient)
 
 	if clientListnerErr != nil {
 		log.Fatalln(clientListnerErr.Error())
@@ -420,7 +412,7 @@ func handleClient() {
 		// fmt.Println("Started an infinite loop to handle Client")
 
 		if conn, connErr := clientListner.Accept(); connErr == nil {
-			fmt.Println("Accepted client")
+			// fmt.Println("Accepted client")
 			handler := clientHandler.NewClientHandler(conn)
 			handleClientRequests(handler)
 		}
