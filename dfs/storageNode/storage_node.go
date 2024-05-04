@@ -276,6 +276,7 @@ func handleClient(wg *sync.WaitGroup) {
 	snPortForClient := os.Args[2]
 
 	clientListner, err := net.Listen("tcp", ":"+snPortForClient)
+	fmt.Println("Listening for client on Port: ", snPortForClient)
 
 	if err != nil {
 		log.Fatalln(err.Error())
@@ -334,9 +335,10 @@ func handleFellowSNRequests(handler *snHandler.StorageNodeHandler) {
 
 func handleFellowSN(wg *sync.WaitGroup) {
 	defer wg.Done()
-	snPortForClient := os.Args[3]
+	snPortForFellowSN := os.Args[3]
 
-	felowSNListner, err := net.Listen("tcp", ":"+snPortForClient)
+	felowSNListner, err := net.Listen("tcp", ":"+snPortForFellowSN)
+	fmt.Println("Listening for fellow storage nodes on Port: ", snPortForFellowSN)
 
 	if err != nil {
 		fmt.Println("Inside handle fellow err")
