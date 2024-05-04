@@ -216,7 +216,7 @@ func handleClientRequests(handler *clientSNHandler.ClientSNHandler, snPortForCli
 			if writeErr != nil {
 				log.Fatalln(writeErr.Error())
 			} else {
-				fmt.Println("File Created: ", chunkNameArr[i])
+				fmt.Println("Chunk Created: ", chunkNameArr[i])
 			}
 		}
 	} else if action == "get" {
